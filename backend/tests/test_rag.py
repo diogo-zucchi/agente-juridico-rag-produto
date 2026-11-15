@@ -281,7 +281,7 @@ class TestBuscaVetorial:
         db_mock.execute.return_value.all.return_value = [(chunk_mock, -0.82)]
 
         with patch("app.services.ingestao_service.gerar_embeddings",
-                   return_value=np.zeros((1, 384), dtype="float32")):
+                   return_value=np.zeros((1, 1536), dtype="float32")):
             resultado = buscar_chunks(db_mock, "pergunta", top_k=3,
                                       id_documento=id_documento)
 
@@ -462,3 +462,153 @@ class TestAPI:
             )
         assert r.status_code == 200
         assert "resposta" in r.json()
+
+    def test_ingerir_responde_202_e_agenda_a_indexacao(self, client):
+        doc = MagicMock(id=7, titulo="Lei X", nivel_dificuldade=None, status="processando")
+        with patch("app.api.routes.ingestao_service.registrar_documento",
+                   return_value=(doc, True)), \
+             patch("app.api.routes.ingestao_service.processar_documento") as processar:
+            r = client.post(
+                "/api/v1/ingerir",
+                files={"arquivo": ("lei.txt", b"Art. 1o Texto.", "text/plain")},
+                data={"titulo": "Lei X"},
+            )
+        assert r.status_code == 202
+        assert r.json()["status"] == "processando"
+        processar.assert_called_once_with(7)
+
+    def test_ingerir_arquivo_repetido_nao_reindexa(self, client):
+        doc = MagicMock(id=7, titulo="Lei X", nivel_dificuldade=None, status="concluido")
+        with patch("app.api.routes.ingestao_service.registrar_documento",
+                   return_value=(doc, False)), \
+             patch("app.api.routes.ingestao_service.processar_documento") as processar:
+            r = client.post(
+                "/api/v1/ingerir",
+                files={"arquivo": ("lei.txt", b"Art. 1o Texto.", "text/plain")},
+                data={"titulo": "Lei X"},
+            )
+        assert r.status_code == 202
+        processar.assert_not_called()
+
+    def test_token_exigido_quando_configurado(self, client):
+        config = MagicMock(api_token="segredo")
+        with patch("app.core.seguranca.get_settings", return_value=config), \
+             patch("app.api.routes.rag_service.listar_historico", return_value=[]):
+            assert client.get("/api/v1/historico").status_code == 401
+            assert client.get("/api/v1/historico",
+                              headers={"X-API-Key": "errado"}).status_code == 401
+            assert client.get("/api/v1/historico",
+                              headers={"X-API-Key": "segredo"}).status_code == 200
+            # a página em / continua pública (ela é quem pede o token)
+            assert client.get("/").status_code == 200
+
+    def test_sem_token_configurado_acesso_livre(self, client):
+        with patch("app.core.seguranca.get_settings", return_value=MagicMock(api_token="")), \
+             patch("app.api.routes.rag_service.listar_historico", return_value=[]):
+            assert client.get("/api/v1/historico").status_code == 200
+
+
+# ─────────────────────────────────────────────
+# Testes de Embeddings por API
+# ─────────────────────────────────────────────
+
+class TestEmbeddings:
+    def _cliente(self, dim):
+        def criar(model, input):
+            resposta = MagicMock()
+            resposta.data = [MagicMock(embedding=[3.0, 4.0] + [0.0] * (dim - 2)) for _ in input]
+            return resposta
+        cliente = MagicMock()
+        cliente.embeddings.create.side_effect = criar
+        return cliente
+
+    def test_gera_em_lotes_e_normaliza(self):
+        from app.services import ingestao_service as ing
+        cliente = self._cliente(ing.settings.embedding_dim)
+        with patch.object(ing, "_get_cliente_embeddings", return_value=cliente):
+            vetores = ing.gerar_embeddings(["trecho"] * 300)
+
+        assert vetores.shape == (300, ing.settings.embedding_dim)
+        assert cliente.embeddings.create.call_count == 3      # lotes de 128
+        assert list(vetores[0][:2]) == pytest.approx([0.6, 0.8])  # norma 1
+
+    def test_dimensao_diferente_da_coluna_falha(self):
+        from app.services import ingestao_service as ing
+        with patch.object(ing, "_get_cliente_embeddings", return_value=self._cliente(384)):
+            with pytest.raises(ValueError, match="EMBEDDING_DIM"):
+                ing.gerar_embeddings(["trecho"])
+
+    def test_lista_vazia_nao_chama_a_api(self):
+        from app.services import ingestao_service as ing
+        with patch.object(ing, "_get_cliente_embeddings") as cliente:
+            assert ing.gerar_embeddings([]).shape == (0, ing.settings.embedding_dim)
+        cliente.assert_not_called()
+
+
+# ─────────────────────────────────────────────
+# Testes da Ingestão em segundo plano
+# ─────────────────────────────────────────────
+
+class TestIngestaoEmSegundoPlano:
+    def _arquivo(self, tmp_path):
+        arquivo = tmp_path / "lei.txt"
+        arquivo.write_text("Art. 1º Texto da lei.", encoding="utf-8")
+        return str(arquivo)
+
+    def _db(self, existente=None):
+        db = MagicMock()
+        db.query.return_value.filter_by.return_value.first.return_value = existente
+        return db
+
+    def test_documento_novo_fica_processando(self, tmp_path):
+        from app.services.ingestao_service import registrar_documento
+        db = self._db()
+        doc, processar = registrar_documento(db, self._arquivo(tmp_path), "Lei X")
+
+        assert processar is True
+        assert doc.status == "processando"
+        db.add.assert_called_once_with(doc)
+        db.commit.assert_called_once()
+
+    def test_arquivo_ja_indexado_nao_reprocessa(self, tmp_path):
+        from app.services.ingestao_service import registrar_documento
+        existente = MagicMock(status="concluido")
+        doc, processar = registrar_documento(self._db(existente), self._arquivo(tmp_path), "Lei X")
+        assert (doc, processar) == (existente, False)
+
+    def test_arquivo_que_falhou_e_reprocessado(self, tmp_path):
+        from app.services.ingestao_service import registrar_documento
+        existente = MagicMock(status="erro", erro="sem chave")
+        doc, processar = registrar_documento(self._db(existente), self._arquivo(tmp_path), "Lei X")
+        assert processar is True
+        assert (doc.status, doc.erro) == ("processando", None)
+
+    def _processar(self, embeddings):
+        from app.services import ingestao_service as ing
+        doc = MagicMock(id=1, titulo="Lei X", texto="Texto curto de um parecer.")
+        db = MagicMock()
+        db.get.return_value = doc
+        with patch.object(ing, "SessionLocal", return_value=db), \
+             patch.object(ing, "gerar_embeddings", **embeddings):
+            ing.processar_documento(1)
+        return doc, db
+
+    def test_processar_grava_chunks_e_conclui(self):
+        import numpy as np
+        from app.models.models import Chunk
+        from app.services.ingestao_service import settings
+        doc, db = self._processar(
+            {"return_value": np.zeros((1, settings.embedding_dim), dtype="float32")})
+
+        assert doc.status == "concluido"
+        assert isinstance(db.add.call_args.args[0], Chunk)
+        db.commit.assert_called_once()
+        db.close.assert_called_once()
+
+    def test_falha_na_api_marca_erro(self):
+        doc, db = self._processar({"side_effect": RuntimeError("chave inválida")})
+
+        db.rollback.assert_called_once()
+        assert doc.status == "erro"
+        assert "chave inválida" in doc.erro
+        db.close.assert_called_once()

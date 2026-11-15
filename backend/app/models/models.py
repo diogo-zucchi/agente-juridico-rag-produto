@@ -1,9 +1,10 @@
 """
-Modelos ORM — espelham as tabelas do init_db.sql.
+Modelos ORM — são a definição do esquema: criar_tabelas() cria as
+tabelas a partir deles, tanto no Docker local quanto num banco hospedado.
 """
 from datetime import datetime, date
 from sqlalchemy import (
-    Column, Integer, String, Text, Date, Float,
+    CheckConstraint, Column, Integer, String, Text, Date, Float,
     DateTime, ForeignKey, func
 )
 from sqlalchemy.orm import relationship
@@ -24,6 +25,12 @@ class Fonte(Base):
     documentos = relationship("Documento", back_populates="fonte")
 
 
+# status da indexação de um documento
+STATUS_PROCESSANDO = "processando"
+STATUS_CONCLUIDO   = "concluido"
+STATUS_ERRO        = "erro"
+
+
 class Documento(Base):
     __tablename__ = "documentos"
 
@@ -33,9 +40,12 @@ class Documento(Base):
     data_publicacao  = Column(Date)
     # rótulo do experimento: 'facil', 'medio' ou 'dificil'
     nivel_dificuldade = Column(String(20), nullable=True)
-    id_fonte         = Column(Integer, ForeignKey("fontes.id"))
+    id_fonte         = Column(Integer, ForeignKey("fontes.id", ondelete="SET NULL"))
     hash_integridade = Column(String(64), unique=True)
     arquivo_origem   = Column(String(500))
+    status           = Column(String(20), nullable=False, default=STATUS_CONCLUIDO)
+    # mensagem da falha, quando status = 'erro'
+    erro             = Column(Text, nullable=True)
     criado_em        = Column(DateTime, default=func.now())
 
     fonte  = relationship("Fonte", back_populates="documentos")
@@ -46,10 +56,14 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id           = Column(Integer, primary_key=True, index=True)
-    id_documento = Column(Integer, ForeignKey("documentos.id", ondelete="CASCADE"))
+    # indexado: filtro da busca restrita a um documento
+    id_documento = Column(Integer, ForeignKey("documentos.id", ondelete="CASCADE"), index=True)
     texto_chunk  = Column(Text, nullable=False)
     indice_chunk = Column(Integer, nullable=False)
-    # vetor normalizado do texto_chunk (pgvector)
+    # vetor normalizado do texto_chunk (pgvector). Sem índice vetorial de
+    # propósito: com poucos milhares de chunks a busca exata é rápida e
+    # determinística. Se o volume crescer, crie um HNSW:
+    #   CREATE INDEX ON chunks USING hnsw (embedding vector_ip_ops);
     embedding    = Column(Vector(get_settings().embedding_dim))
     criado_em    = Column(DateTime, default=func.now())
 
@@ -63,7 +77,9 @@ class Consulta(Base):
     id          = Column(Integer, primary_key=True, index=True)
     pergunta    = Column(Text, nullable=False)
     data_hora   = Column(DateTime, default=func.now())
-    id_resposta = Column(Integer, ForeignKey("respostas.id"), nullable=True)
+    # use_alter: consultas e respostas se referenciam (FK criada por ALTER TABLE)
+    id_resposta = Column(Integer, ForeignKey("respostas.id", ondelete="SET NULL", use_alter=True),
+                         nullable=True)
     # documento usado no teste (quando a busca é restrita a 1 documento)
     id_documento = Column(Integer, ForeignKey("documentos.id", ondelete="SET NULL"), nullable=True)
 
@@ -104,6 +120,7 @@ class RespostaDocumento(Base):
 
 class Avaliacao(Base):
     __tablename__ = "avaliacoes"
+    __table_args__ = (CheckConstraint("nota BETWEEN 1 AND 5", name="avaliacoes_nota_check"),)
 
     id          = Column(Integer, primary_key=True, index=True)
     id_resposta = Column(Integer, ForeignKey("respostas.id", ondelete="CASCADE"))

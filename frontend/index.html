@@ -221,9 +221,7 @@
         <h2>Resultados das Avaliações</h2>
         <div class="btn-row">
           <button class="btn-primary" onclick="carregarResultados()">Atualizar</button>
-          <a href="http://localhost:8000/api/v1/resultados/csv" target="_blank">
-            <button class="btn-outline">Baixar CSV</button>
-          </a>
+          <button class="btn-outline" onclick="baixarCSV()">Baixar CSV</button>
         </div>
         <div id="resultados-conteudo" style="margin-top:1rem">
           <p class="hint">Clique em "Atualizar" para carregar.</p>
@@ -261,8 +259,32 @@
 </div>
 
 <script>
-  const API_BASE = "http://localhost:8000/api/v1";
+  // a página é servida pela própria API: caminhos relativos funcionam
+  // tanto em localhost quanto no domínio hospedado
+  const API_BASE = "/api/v1";
   let respostasAtuais = [];   // [{resposta_id, modelo_llm, rotulo, nota}]
+
+  // escapa texto vindo do servidor antes de inserir em innerHTML
+  function esc(v){
+    return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  // token de acesso (API_TOKEN do servidor), guardado neste navegador
+  function lerToken(){ try{ return localStorage.getItem("api_token") || ""; }catch{ return ""; } }
+  function salvarToken(t){ try{ localStorage.setItem("api_token", t); }catch{} }
+
+  // fetch para a API com o token; num 401 pede o token e tenta de novo uma vez
+  async function api(caminho, opcoes = {}, tentouToken = false){
+    const headers = { ...(opcoes.headers || {}) };
+    const token = lerToken();
+    if(token) headers["X-API-Key"] = token;
+    const r = await fetch(API_BASE + caminho, { ...opcoes, headers });
+    if(r.status === 401 && !tentouToken){
+      const novo = prompt("Esta API exige um token de acesso. Informe o token:");
+      if(novo){ salvarToken(novo.trim()); return api(caminho, opcoes, true); }
+    }
+    return r;
+  }
 
   window.addEventListener("load", () => {
     verificarAPI(); carregarHistorico(); carregarDocumentos();
@@ -279,7 +301,7 @@
   async function verificarAPI(){
     const el = document.getElementById("api-status");
     try{
-      const r = await fetch("http://localhost:8000/health");
+      const r = await fetch("/health");
       const d = await r.json();
       el.innerHTML = d.status==="ok"
         ? '<span style="color:var(--verde)">✅ Online — Banco conectado</span>'
@@ -289,19 +311,23 @@
 
   async function carregarDocumentos(){
     try{
-      const r = await fetch(`${API_BASE}/documentos`);
+      const r = await api("/documentos");
+      if(!r.ok) return [];
       const docs = await r.json();
       const selConsulta = document.getElementById("doc-consulta");
       const selAval = document.getElementById("doc-aval");
       selConsulta.innerHTML = '<option value="">Todos os documentos</option>';
       selAval.innerHTML = '<option value="">Selecione um documento...</option>';
+      const rotuloStatus = { processando:" (indexando…)", erro:" (falhou)" };
       docs.forEach(d=>{
         const dif = d.nivel_dificuldade ? ` [${d.nivel_dificuldade}]` : "";
-        const opt = `<option value="${d.id}">${d.titulo}${dif}</option>`;
+        const pronto = d.status === "concluido";
+        const opt = `<option value="${d.id}"${pronto ? "" : " disabled"}>${esc(d.titulo)}${esc(dif)}${rotuloStatus[d.status] || ""}</option>`;
         selConsulta.innerHTML += opt;
         selAval.innerHTML += opt;
       });
-    }catch(e){ console.error("Erro ao carregar documentos", e); }
+      return docs;
+    }catch(e){ console.error("Erro ao carregar documentos", e); return []; }
   }
 
   /* ───── Consulta com 1 LLM ───── */
@@ -315,11 +341,12 @@
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Consultando...';
     document.getElementById("resposta-box").classList.add("hidden");
     try{
-      const r = await fetch(`${API_BASE}/consultar`,{
+      const r = await api("/consultar",{
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ pergunta, provedor, id_documento: idDoc? Number(idDoc):null })
       });
       const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || r.status);
       document.getElementById("resposta-texto").textContent = d.resposta;
       renderFontes("fontes-conteudo", d.fontes);
       document.getElementById("resposta-box").classList.remove("hidden");
@@ -332,9 +359,9 @@
     const fc = document.getElementById(elId); fc.innerHTML="";
     if(fontes && fontes.length){
       fontes.forEach((f,i)=>{
-        fc.innerHTML += `<div class="fonte-item"><strong>[${i+1}] ${f.titulo}</strong>
-          ${f.fonte} &nbsp;<span class="score">score: ${Number(f.score).toFixed(3)}</span>
-          <div style="margin-top:.3rem;color:#475569">${(f.texto_chunk||"").substring(0,120)}…</div></div>`;
+        fc.innerHTML += `<div class="fonte-item"><strong>[${i+1}] ${esc(f.titulo)}</strong>
+          ${esc(f.fonte)} &nbsp;<span class="score">score: ${Number(f.score).toFixed(3)}</span>
+          <div style="margin-top:.3rem;color:#475569">${esc((f.texto_chunk||"").substring(0,120))}…</div></div>`;
       });
     } else { fc.innerHTML = '<p class="hint">Nenhuma fonte utilizada.</p>'; }
   }
@@ -358,8 +385,8 @@
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
-        <h2>Resposta ${resp.rotulo}</h2>
-        <div class="resposta-texto">${resp.texto.replace(/</g,"&lt;")}</div>
+        <h2>Resposta ${esc(resp.rotulo)}</h2>
+        <div class="resposta-texto">${esc(resp.texto)}</div>
         <label class="lbl">Nota (1 a 5)</label>
         <div class="stars" id="stars-${idx}"></div>
         <label class="lbl">Comentário (opcional)</label>
@@ -388,11 +415,12 @@
     document.getElementById("comparacao-box").classList.add("hidden");
     document.getElementById("revelacao").classList.add("hidden");
     try{
-      const r = await fetch(`${API_BASE}/comparar`,{
+      const r = await api("/comparar",{
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ pergunta, id_documento: Number(idDoc) })
       });
       const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || r.status);
       respostasAtuais = d.respostas.map(x => ({
         resposta_id: x.resposta_id,
         modelo_llm: x.modelo_llm,
@@ -425,14 +453,14 @@
       // Revela qual LLM era cada uma (só após salvar, para não enviesar)
       const rev = document.getElementById("revelacao");
       rev.innerHTML = "Identificação (revelada após salvar): " +
-        respostasAtuais.map(r => `<b>Resposta ${r.rotulo} = ${r.modelo_llm}</b>`).join(" · ");
+        respostasAtuais.map(r => `<b>Resposta ${esc(r.rotulo)} = ${esc(r.modelo_llm)}</b>`).join(" · ");
       rev.classList.remove("hidden");
     }catch(e){ document.getElementById("save-status").innerHTML='<span class="err">Erro ao salvar.</span>'; console.error(e); }
     finally{ btn.disabled=false; }
   }
 
   async function enviarAvaliacao(id_resposta, nota, comentario, avaliador){
-    const r = await fetch(`${API_BASE}/avaliar`,{
+    const r = await api("/avaliar",{
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ id_resposta, nota, comentario: comentario||null, avaliador })
     });
@@ -444,8 +472,9 @@
     const el = document.getElementById("resultados-conteudo");
     el.innerHTML = '<p class="hint">Carregando...</p>';
     try{
-      const r = await fetch(`${API_BASE}/resultados`);
+      const r = await api("/resultados");
       const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || r.status);
       if(!d.linhas.length){ el.innerHTML='<p class="hint">Ainda não há avaliações salvas.</p>'; return; }
 
       // Gráfico: nota média por LLM x dificuldade
@@ -454,27 +483,39 @@
       d.resumo_por_llm_dificuldade.forEach(row=>{
         const pct = (row.nota_media/5*100).toFixed(0);
         const cor = cores[row.modelo_llm] || "#64748b";
-        chart += `<div class="bar-wrap"><div class="bar-label">${row.modelo_llm} · ${row.nivel_dificuldade} (n=${row.n})</div>
+        chart += `<div class="bar-wrap"><div class="bar-label">${esc(row.modelo_llm)} · ${esc(row.nivel_dificuldade)} (n=${row.n})</div>
           <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${cor}">${row.nota_media}</div></div></div>`;
       });
 
       // Resumo geral por LLM
       let resumo = '<h2 style="margin:1rem 0 .6rem">Média geral por LLM</h2><table><tr><th>LLM</th><th>Nota média</th><th>Avaliações</th></tr>';
       d.resumo_por_llm.forEach(row=>{
-        resumo += `<tr><td>${row.modelo_llm}</td><td><b>${row.nota_media}</b></td><td>${row.n}</td></tr>`;
+        resumo += `<tr><td>${esc(row.modelo_llm)}</td><td><b>${row.nota_media}</b></td><td>${row.n}</td></tr>`;
       });
       resumo += '</table>';
 
       // Tabela detalhada
       let tabela = '<h2 style="margin:1rem 0 .6rem">Detalhe</h2><table><tr><th>Doc</th><th>Dif.</th><th>LLM</th><th>Nota</th><th>Avaliador</th></tr>';
       d.linhas.forEach(l=>{
-        tabela += `<tr><td>${l.documento||"-"}</td><td>${l.nivel_dificuldade||"-"}</td>
-          <td>${l.modelo_llm}</td><td><b>${l.nota}</b></td><td>${l.avaliador||"-"}</td></tr>`;
+        tabela += `<tr><td>${esc(l.documento||"-")}</td><td>${esc(l.nivel_dificuldade||"-")}</td>
+          <td>${esc(l.modelo_llm)}</td><td><b>${l.nota}</b></td><td>${esc(l.avaliador||"-")}</td></tr>`;
       });
       tabela += '</table>';
 
       el.innerHTML = chart + resumo + tabela;
     }catch(e){ el.innerHTML='<p class="err">Erro ao carregar resultados.</p>'; console.error(e); }
+  }
+
+  // o download passa pelo api() para levar o token (um link simples não leva)
+  async function baixarCSV(){
+    try{
+      const r = await api("/resultados/csv");
+      if(!r.ok) throw new Error(r.status);
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement("a");
+      a.href = url; a.download = "avaliacoes.csv"; a.click();
+      URL.revokeObjectURL(url);
+    }catch(e){ alert("Erro ao baixar o CSV."); console.error(e); }
   }
 
   /* ───── Upload ───── */
@@ -493,36 +534,56 @@
     const status = document.getElementById("upload-status");
     if(!input.files.length){ status.innerHTML='<span class="err">Selecione um arquivo.</span>'; return; }
     if(!titulo){ status.innerHTML='<span class="err">Informe o título.</span>'; return; }
-    status.textContent="Indexando…";
+    status.textContent="Enviando…";
     const fd = new FormData();
     fd.append("arquivo", input.files[0]);
     fd.append("titulo", titulo);
     if(dif) fd.append("nivel_dificuldade", dif);
     try{
-      const r = await fetch(`${API_BASE}/ingerir`,{ method:"POST", body: fd });
+      const r = await api("/ingerir",{ method:"POST", body: fd });
       const d = await r.json();
       if(r.ok){
-        status.innerHTML = `<span class="ok">✅ ${d.mensagem} (ID: ${d.documento_id})</span>`;
         input.value=""; document.getElementById("titulo-doc").value="";
         document.getElementById("upload-label").innerHTML="Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em>";
         document.getElementById("dificuldade-doc").value="";
-        carregarDocumentos();
-      } else { status.innerHTML = `<span class="err">❌ ${d.detail}</span>`; }
+        acompanharIndexacao(d.documento_id, d.mensagem);
+      } else { status.innerHTML = `<span class="err">❌ ${esc(d.detail)}</span>`; }
     }catch(e){ status.innerHTML='<span class="err">❌ Erro de conexão com a API.</span>'; }
+  }
+
+  // a indexação roda em segundo plano no servidor: consulta o status até terminar
+  async function acompanharIndexacao(id, mensagem){
+    const status = document.getElementById("upload-status");
+    status.innerHTML = `<span class="hint">⏳ ${esc(mensagem)}</span>`;
+    for(;;){
+      const doc = (await carregarDocumentos()).find(d => d.id === id);
+      if(!doc){ status.textContent = ""; return; }
+      if(doc.status === "concluido"){
+        status.innerHTML = `<span class="ok">✅ "${esc(doc.titulo)}" indexado (ID: ${doc.id})</span>`; return;
+      }
+      if(doc.status === "erro"){
+        status.innerHTML = `<span class="err">❌ Falha ao indexar: ${esc(doc.erro)}</span>`; return;
+      }
+      await new Promise(ok => setTimeout(ok, 3000));
+    }
   }
 
   /* ───── Histórico ───── */
   async function carregarHistorico(){
     const lista = document.getElementById("historico-lista");
     try{
-      const r = await fetch(`${API_BASE}/historico?limite=15`);
+      const r = await api("/historico?limite=15");
+      if(!r.ok) throw new Error(r.status);
       const d = await r.json();
       if(!d.length){ lista.innerHTML='<p class="hint">Nenhuma consulta ainda.</p>'; return; }
-      lista.innerHTML = d.map(c=>`
-        <div class="hist-item" onclick="preencherPergunta('${c.pergunta.replace(/'/g,"\\'")}')">
-          <div>${c.pergunta.substring(0,70)}${c.pergunta.length>70?"…":""}</div>
+      lista.innerHTML = d.map((c, i)=>`
+        <div class="hist-item" data-i="${i}">
+          <div>${esc(c.pergunta.substring(0,70))}${c.pergunta.length>70?"…":""}</div>
           <div class="hist-data">${new Date(c.data_hora).toLocaleString("pt-BR")}</div>
         </div>`).join("");
+      // o texto vai pelo índice, não interpolado num onclick
+      lista.querySelectorAll(".hist-item").forEach(el =>
+        el.addEventListener("click", () => preencherPergunta(d[el.dataset.i].pergunta)));
     }catch{ lista.innerHTML='<p class="hint">Histórico indisponível.</p>'; }
   }
   function preencherPergunta(texto){

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -49,6 +49,8 @@ class DocumentoSchema(BaseModel):
     id: int
     titulo: str
     nivel_dificuldade: Optional[str] = None
+    status: str                                # 'processando', 'concluido' ou 'erro'
+    erro: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -139,14 +141,19 @@ def historico(limite: int = 20, db: Session = Depends(get_db)):
     return rag_service.listar_historico(db=db, limite=limite)
 
 
-@router.post("/ingerir", tags=["Ingestão"])
+@router.post("/ingerir", status_code=202, tags=["Ingestão"])
 def ingerir_documento(
+    background_tasks: BackgroundTasks,
     arquivo: UploadFile = File(...),
     titulo: str = Form(...),
     id_fonte: Optional[int] = Form(None),
     nivel_dificuldade: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
+    """
+    Lê o arquivo e registra o documento na hora; chunks e embeddings são
+    gerados em segundo plano. Acompanhe pelo status em GET /documentos.
+    """
     extensoes_aceitas = {".pdf", ".txt", ".html", ".htm"}
     ext = os.path.splitext(arquivo.filename)[1].lower()
     if ext not in extensoes_aceitas:
@@ -157,20 +164,27 @@ def ingerir_documento(
         tmp_path = tmp.name
 
     try:
-        doc = ingestao_service.ingerir_documento(
+        doc, precisa_processar = ingestao_service.registrar_documento(
             db=db, caminho=tmp_path, titulo=titulo,
             id_fonte=id_fonte, nivel_dificuldade=nivel_dificuldade,
         )
-        return {
-            "mensagem": "Documento indexado com sucesso.",
-            "documento_id": doc.id,
-            "titulo": doc.titulo,
-            "nivel_dificuldade": doc.nivel_dificuldade,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         os.unlink(tmp_path)
+
+    if precisa_processar:
+        background_tasks.add_task(ingestao_service.processar_documento, doc.id)
+        mensagem = "Documento recebido. A indexação continua em segundo plano."
+    else:
+        mensagem = "Este arquivo já foi enviado antes."
+    return {
+        "mensagem": mensagem,
+        "documento_id": doc.id,
+        "titulo": doc.titulo,
+        "nivel_dificuldade": doc.nivel_dificuldade,
+        "status": doc.status,
+    }
 
 
 @router.get("/documentos", response_model=List[DocumentoSchema], tags=["Ingestão"])
