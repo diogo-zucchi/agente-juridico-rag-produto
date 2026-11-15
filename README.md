@@ -60,7 +60,7 @@ Crie um arquivo `.env` na raiz do projeto com o seguinte conteúdo (substitua as
 
 ```env
 # ── Banco de dados ───────────────────────────────────────
-DATABASE_URL=postgresql+psycopg://postgres:senha@127.0.0.1:5432/agente_juridico
+DATABASE_URL=postgresql+psycopg://postgres:senha@127.0.0.1:5433/agente_juridico
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=senha
 POSTGRES_DB=agente_juridico
@@ -107,7 +107,7 @@ LOG_FILE=                   # vazio: só stdout
 
 ## Execução
 
-1. Subir o banco de dados:
+1. Subir o banco de dados (porta 5433):
 
 ```bash
 docker compose up -d postgres
@@ -117,12 +117,14 @@ docker compose up -d postgres
 
 ```bash
 cd backend
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
-3. Abrir a interface em `http://localhost:8000/` (a API serve o `index.html` na raiz).
+3. Abrir a interface em `http://localhost:8001/` (a API serve o `index.html` na raiz).
 
-Documentação interativa da API (Swagger): `http://localhost:8000/docs`.
+Documentação interativa da API (Swagger): `http://localhost:8001/docs`.
+
+> As portas 5433 e 8001 (e não as padrão 5432 e 8000) deixam o produto rodar ao mesmo tempo que o TCC.
 
 > Alternativa: `docker compose up --build` sobe banco e backend juntos, sem precisar de Python local. O `docker-compose.yml` é só para desenvolvimento (reload, código montado, senha padrão).
 

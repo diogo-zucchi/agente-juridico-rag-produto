@@ -1,6 +1,10 @@
 # Ambiente de DESENVOLVIMENTO local (reload, código montado, senha padrão).
 # Em produção a API roda numa plataforma e o banco é gerenciado: ver
 # "Hospedagem" no README.
+# Nome, container e portas próprios: roda ao mesmo tempo que o TCC
+# (banco na 5432, API na 8000).
+name: agente-juridico-rag-produto
+
 services:
   # --------------------------------------------------------
   # PostgreSQL com extensão pgvector
@@ -8,7 +12,7 @@ services:
   # --------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: agente_juridico_db
+    container_name: agente_juridico_produto_db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -16,7 +20,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agente_juridico}
     ports:
       # só a própria máquina acessa o banco
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +36,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: agente_juridico_api
+    container_name: agente_juridico_produto_api
     restart: unless-stopped
     env_file:
       - path: .env
@@ -41,7 +45,7 @@ services:
       # dentro da rede do compose o banco é "postgres", não "localhost"
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-senha}@postgres:5432/${POSTGRES_DB:-agente_juridico}
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - ./backend:/app/backend
       - ./frontend:/app/frontend
