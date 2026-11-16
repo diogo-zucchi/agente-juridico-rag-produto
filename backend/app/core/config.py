@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:senha@127.0.0.1:5433/agente_juridico"
 
     # ── LLMs ──────────────────────────────────────────────
+    # ordem de tentativa: se o primeiro falhar, a pergunta vai para o próximo
+    llm_provedores: str = "maritaca,openai"
+    # segundos de espera por uma resposta antes de passar para o próximo
+    llm_timeout: float = 60
+
     maritaca_api_key: str = ""
     maritaca_model: str = "sabia-4"
 

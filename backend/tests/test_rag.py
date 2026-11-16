@@ -470,13 +470,6 @@ class TestAPI:
         assert client.get("/api/v1/resultados").status_code == 404
         assert client.get("/api/v1/resultados/csv").status_code == 404
 
-    def test_provedor_desconhecido_cai_no_padrao(self):
-        from app.services import rag_service
-        assert "deepseek" not in rag_service.PROVEDORES
-        with patch.object(rag_service, "_recuperar_chunks", return_value=[]),              patch.object(rag_service, "Consulta"), patch.object(rag_service, "Resposta"):
-            r = rag_service.responder_pergunta(MagicMock(), "pergunta", provedor="deepseek")
-        assert r["modelo_llm"] == "maritaca"
-
     def test_ingerir_responde_202_e_agenda_a_indexacao(self, client):
         doc = MagicMock(id=7, titulo="Lei X", status="processando")
         with patch("app.api.routes.ingestao_service.registrar_documento",
@@ -633,14 +626,45 @@ class TestIngestaoEmSegundoPlano:
 # ─────────────────────────────────────────────
 
 class TestErrosDeProvedor:
+    FONTES = [{"chunk_id": 1, "titulo": "Lei", "fonte": "x", "texto_chunk": "Art. 1º", "score": .9}]
+
+    def _config(self, provedores):
+        return MagicMock(llm_provedores=provedores, top_k_results=5)
+
+    def test_ordem_vem_da_configuracao(self):
+        from app.services import rag_service
+        with patch.object(rag_service, "get_settings",
+                          return_value=self._config(" OpenAI, deepseek,,maritaca,openai ")):
+            assert rag_service.provedores_configurados() == ["openai", "maritaca"]
+        with patch.object(rag_service, "get_settings", return_value=self._config("")):
+            assert rag_service.provedores_configurados() == ["maritaca"]
+
+    def test_plano_b_quando_o_primeiro_falha(self):
+        from app.services import rag_service
+        llms = {"maritaca": MagicMock(side_effect=RuntimeError("fora do ar")),
+                "openai": MagicMock(return_value="Resposta do plano B")}
+        with patch.object(rag_service, "get_settings", return_value=self._config("maritaca,openai")),              patch.object(rag_service, "_recuperar_chunks", return_value=self.FONTES),              patch.object(rag_service, "_get_llm", side_effect=llms.get),              patch.object(rag_service, "Consulta"), patch.object(rag_service, "Resposta"):
+            r = rag_service.responder_pergunta(MagicMock(), "pergunta")
+        assert (r["resposta"], r["modelo_llm"]) == ("Resposta do plano B", "openai")
+        llms["maritaca"].assert_called_once()
+
+    def test_primeiro_respondendo_nao_chama_o_segundo(self):
+        from app.services import rag_service
+        llms = {"maritaca": MagicMock(return_value="ok"), "openai": MagicMock()}
+        with patch.object(rag_service, "get_settings", return_value=self._config("maritaca,openai")),              patch.object(rag_service, "_recuperar_chunks", return_value=self.FONTES),              patch.object(rag_service, "_get_llm", side_effect=llms.get),              patch.object(rag_service, "Consulta"), patch.object(rag_service, "Resposta"):
+            r = rag_service.responder_pergunta(MagicMock(), "pergunta")
+        assert r["modelo_llm"] == "maritaca"
+        llms["openai"].assert_not_called()
+
     def test_falha_do_llm_vira_erro_provedor(self):
         from app.services import rag_service
         fontes = [{"chunk_id": 1, "titulo": "Lei", "fonte": "x", "texto_chunk": "Art. 1º", "score": .9}]
         llm = MagicMock(side_effect=RuntimeError("401 da API"))
         with patch.object(rag_service, "_recuperar_chunks", return_value=fontes), \
              patch.object(rag_service, "_get_llm", return_value=llm):
-            with pytest.raises(rag_service.ErroProvedor, match="Maritaca"):
+            with pytest.raises(rag_service.ErroProvedor, match="Nenhum modelo respondeu"):
                 rag_service.responder_pergunta(MagicMock(), "pergunta")
+        assert llm.call_count == 2      # tentou a Maritaca e a OpenAI
 
     def test_falha_nos_embeddings_vira_erro_provedor(self):
         from openai import APIConnectionError

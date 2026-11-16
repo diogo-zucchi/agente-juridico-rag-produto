@@ -14,8 +14,10 @@ A geração das respostas usa o padrão de API compatível com a OpenAI, de modo
 
 | Provedor | Modelo | Papel |
 |----------|--------|-------|
-| Maritaca | `sabia-4` | **Modelo padrão** — brasileiro, com pré-treino em português e legislação jurídica. |
-| OpenAI | `gpt-4o-mini` | Alternativa, escolhida na interface. |
+| Maritaca | `sabia-4` | **Modelo principal** — brasileiro, com pré-treino em português e legislação jurídica. |
+| OpenAI | `gpt-4o-mini` | **Plano B** — responde quando a Maritaca falha. |
+
+Quem decide o modelo é o servidor, não a página. `LLM_PROVEDORES` define a ordem de tentativa (padrão: `maritaca,openai`): se o primeiro falhar (fora do ar, chave inválida, limite de uso ou demora acima de `LLM_TIMEOUT` segundos), a mesma pergunta vai para o próximo. A resposta indica qual modelo respondeu. Com um provedor só na lista, não há plano B.
 
 ---
 
@@ -58,6 +60,9 @@ Crie um arquivo `.env` na raiz do projeto com o seguinte conteúdo (substitua as
 DATABASE_URL=postgresql://usuario:senha@host.neon.tech/neondb?sslmode=require
 
 # ── Modelos de linguagem ─────────────────────────────────
+LLM_PROVEDORES=maritaca,openai   # ordem de tentativa (plano B)
+LLM_TIMEOUT=60
+
 MARITACA_API_KEY=sua_chave_maritaca
 MARITACA_MODEL=sabia-4
 
@@ -86,7 +91,7 @@ LOG_LEVEL=INFO
 LOG_FILE=                   # vazio: só stdout
 ```
 
-> Bastam `MARITACA_API_KEY` (respostas) e `OPENAI_API_KEY` (embeddings e, se escolhido na interface, respostas com o GPT).
+> Bastam `MARITACA_API_KEY` (respostas) e `OPENAI_API_KEY` (embeddings e o plano B das respostas).
 >
 > `EMBEDDING_MODEL` e `EMBEDDING_DIM` andam juntos e definem a coluna `vector(N)` do banco. Para trocar de modelo, recrie o banco e indexe os documentos de novo.
 
@@ -165,7 +170,7 @@ Prefixo: `/api/v1`
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `POST` | `/consultar` | Consulta com um modelo (padrão: Maritaca). Responde `502` se o LLM ou a API de embeddings falhar. |
+| `POST` | `/consultar` | Consulta; o modelo segue `LLM_PROVEDORES`, com plano B. Responde `502` se todos os modelos ou a API de embeddings falharem. |
 | `POST` | `/ingerir` | Recebe um documento e o indexa em segundo plano (responde `202`). |
 | `GET`  | `/documentos` | Lista os documentos, o status da indexação e o total de trechos de cada um. |
 | `POST` | `/documentos/{id}/reindexar` | Refaz chunks e embeddings a partir do texto salvo (responde `202`). |

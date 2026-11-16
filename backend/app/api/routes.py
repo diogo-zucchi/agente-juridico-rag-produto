@@ -18,7 +18,7 @@ router = APIRouter()
 # ─────────────────────────────────────────────
 class PerguntaRequest(BaseModel):
     pergunta: str
-    provedor: Optional[str] = "maritaca"      # 'maritaca' ou 'openai'
+    # o modelo não é escolhido aqui: vem de LLM_PROVEDORES, com plano B
     id_documento: Optional[int] = None
     top_k: Optional[int] = None
 
@@ -43,7 +43,7 @@ class DocumentoSchema(BaseModel):
 
 
 # ─────────────────────────────────────────────
-# Consulta com uma LLM
+# Consulta
 # ─────────────────────────────────────────────
 @router.post("/consultar", tags=["RAG"])
 def consultar(req: PerguntaRequest, db: Session = Depends(get_db)):
@@ -53,7 +53,6 @@ def consultar(req: PerguntaRequest, db: Session = Depends(get_db)):
         return rag_service.responder_pergunta(
             db=db,
             pergunta=req.pergunta,
-            provedor=req.provedor or "maritaca",
             top_k=req.top_k,
             id_documento=req.id_documento,
         )

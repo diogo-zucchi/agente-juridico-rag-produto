@@ -28,7 +28,7 @@ Pergunta: {pergunta}
 
 Resposta fundamentada:"""
 
-# Provedores de LLM suportados
+# Provedores de LLM suportados; a ordem de tentativa vem de LLM_PROVEDORES
 PROVEDORES = ("maritaca", "openai")
 NOMES_PROVEDORES = {"maritaca": "Maritaca", "openai": "OpenAI"}
 
@@ -39,6 +39,23 @@ class ErroProvedor(Exception):
 
 # Cache de invocadores por provedor (criados sob demanda)
 _llms: Dict[str, Callable[[str], str]] = {}
+
+
+def provedores_configurados() -> List[str]:
+    """
+    Provedores de LLM_PROVEDORES, na ordem, sem repetidos nem desconhecidos.
+    Lista vazia ou inválida: só a Maritaca.
+    """
+    lista = []
+    for nome in get_settings().llm_provedores.split(","):
+        nome = nome.strip().lower()
+        if not nome:
+            continue
+        if nome not in PROVEDORES:
+            logger.warning(f"LLM_PROVEDORES: provedor desconhecido ignorado: {nome}")
+        elif nome not in lista:
+            lista.append(nome)
+    return lista or ["maritaca"]
 
 
 # ─────────────────────────────────────────────
@@ -54,6 +71,8 @@ def _criar_llm(provedor: str) -> Callable[[str], str]:
         client = OpenAI(
             api_key=settings.maritaca_api_key,
             base_url="https://chat.maritaca.ai/api",
+            timeout=settings.llm_timeout,
+            max_retries=1,
         )
         modelo = settings.maritaca_model
 
@@ -62,6 +81,8 @@ def _criar_llm(provedor: str) -> Callable[[str], str]:
         client = OpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            timeout=settings.llm_timeout,
+            max_retries=1,
         )
         modelo = settings.openai_model
 
@@ -206,23 +227,31 @@ def _descrever_fonte(chunk: Chunk, texto: str, score: float, exato: bool = False
     }
 
 
-def _gerar_texto(provedor: str, chunks_com_score: List[Dict], pergunta: str) -> str:
+def _gerar_texto(chunks_com_score: List[Dict], pergunta: str) -> Tuple[str, str]:
+    """
+    Devolve (texto, provedor que respondeu). Tenta os provedores na ordem de
+    LLM_PROVEDORES: se um falhar (fora do ar, chave inválida, limite, demora
+    acima de LLM_TIMEOUT), a mesma pergunta vai para o próximo.
+    """
+    provedores = provedores_configurados()
     if not chunks_com_score:
         return (
             "Não encontrei documentos jurídicos relevantes para sua pergunta. "
             "Por favor, indexe documentos relacionados ao tema antes de consultar."
-        )
+        ), provedores[0]
     contexto = _montar_contexto(chunks_com_score)
     prompt = PROMPT_JURIDICO.format(contexto=contexto, pergunta=pergunta)
-    logger.info(f"Gerando resposta com LLM: {provedor}")
-    try:
-        return _get_llm(provedor)(prompt)
-    except Exception as e:
-        logger.error(f"Erro ao chamar LLM {provedor}: {e}")
-        raise ErroProvedor(
-            f"O modelo {NOMES_PROVEDORES[provedor]} não respondeu. "
-            "Verifique a chave de API e o modelo configurado, ou tente o outro modelo."
-        ) from e
+    for provedor in provedores:
+        logger.info(f"Gerando resposta com LLM: {provedor}")
+        try:
+            return _get_llm(provedor)(prompt), provedor
+        except Exception as e:
+            logger.error(f"Erro ao chamar LLM {provedor}: {e}")
+    nomes = ", ".join(NOMES_PROVEDORES[p] for p in provedores)
+    raise ErroProvedor(
+        f"Nenhum modelo respondeu ({nomes}). "
+        "Verifique as chaves de API e os modelos configurados."
+    )
 
 
 def _salvar_resposta(
@@ -254,14 +283,11 @@ def _salvar_resposta(
 def responder_pergunta(
     db: Session,
     pergunta: str,
-    provedor: str = "maritaca",
     top_k: int | None = None,
     id_documento: int | None = None,
 ) -> Dict[str, Any]:
     settings = get_settings()
     k = top_k or settings.top_k_results
-    if provedor not in PROVEDORES:
-        provedor = "maritaca"
 
     try:
         fontes = _recuperar_chunks(db, pergunta, k, id_documento)
@@ -271,7 +297,7 @@ def responder_pergunta(
             "Não foi possível consultar o serviço de embeddings. "
             "Verifique a chave e o modelo de embeddings configurados."
         ) from e
-    texto = _gerar_texto(provedor, fontes, pergunta)
+    texto, provedor = _gerar_texto(fontes, pergunta)
 
     consulta = Consulta(pergunta=pergunta, id_documento=id_documento)
     db.add(consulta)

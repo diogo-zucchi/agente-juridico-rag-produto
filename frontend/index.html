@@ -130,8 +130,12 @@
     select option:disabled { color: var(--faint); }
 
     label.lbl { display: block; font-size: .72rem; color: var(--muted); margin: 0 0 .4rem; letter-spacing: .02em; }
-    .campos { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; margin-top: .9rem; }
-    @media (max-width: 560px) { .campos { grid-template-columns: 1fr; } }
+    .campos { margin-top: .9rem; }
+    .link-filtro {
+      padding: 0; font-size: .78rem; color: var(--muted);
+      text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-2);
+    }
+    .link-filtro:hover { color: var(--text); }
 
     .compositor { position: relative; }
     .atalho {
@@ -377,14 +381,8 @@
       </div>
 
       <div class="campos">
-        <div>
-          <label class="lbl" for="provedor">Modelo</label>
-          <select id="provedor">
-            <option value="maritaca">Maritaca — Sabiá</option>
-            <option value="openai">ChatGPT (OpenAI)</option>
-          </select>
-        </div>
-        <div>
+        <button type="button" class="link-filtro" id="btn-filtro" onclick="mostrarFiltro(true)">Filtrar por documento</button>
+        <div id="filtro-doc" class="hidden">
           <label class="lbl" for="doc-consulta">Documento</label>
           <select id="doc-consulta"><option value="">Todos os documentos</option></select>
         </div>
@@ -489,7 +487,6 @@
   // documento recém-enviado cuja indexação o painel de upload acompanha
   let acompanhando = null;
   let timerDocumentos = null;
-  let primeiraCargaDocs = true;
   // sem consultas ainda: a página mostra sugestões tiradas dos documentos indexados
   let historicoVazio = false;
 
@@ -598,10 +595,8 @@
   /* ───── Inicialização ───── */
   window.addEventListener("load", () => {
     atualizarBotaoToken();
-    const provedor = lerLocal("pref_provedor");
-    if(provedor && NOMES_MODELOS[provedor]) $("provedor").value = provedor;
-    $("provedor").addEventListener("change", e => gravarLocal("pref_provedor", e.target.value));
-    $("doc-consulta").addEventListener("change", e => gravarLocal("pref_documento", e.target.value));
+    gravarLocal("pref_provedor", "");   // escolha de modelo antiga: agora o servidor decide
+    gravarLocal("pref_documento", "");   // o filtro não é mais lembrado entre visitas
     $("pergunta").addEventListener("keydown", e => {
       if(e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); consultar(); }
     });
@@ -631,10 +626,9 @@
     if(!res.ok){ lista.innerHTML = `<p class="hint">${esc(res.mensagem)}</p>`; return; }
     const docs = res.dados;
 
-    // select da consulta: mantém a escolha atual (ou a salva, na primeira carga)
+    // select da consulta: mantém a escolha atual; cada visita começa em "Todos"
     const sel = $("doc-consulta");
-    const escolhido = primeiraCargaDocs ? lerLocal("pref_documento") : sel.value;
-    primeiraCargaDocs = false;
+    const escolhido = sel.value;
     const rotuloStatus = { processando:" (indexando…)", erro:" (falhou)" };
     sel.innerHTML = '<option value="">Todos os documentos</option>' + docs.map(d =>
       `<option value="${d.id}"${d.status === "concluido" ? "" : " disabled"}>${esc(d.titulo)}${rotuloStatus[d.status] || ""}</option>`
@@ -682,9 +676,17 @@
     }));
   }
 
+  // o filtro fica escondido atrás de um link; abre ao clicar nele ou quando
+  // um documento é escolhido pela lista lateral ou por uma sugestão
+  function mostrarFiltro(focar = false){
+    $("btn-filtro").classList.add("hidden");
+    $("filtro-doc").classList.remove("hidden");
+    if(focar) $("doc-consulta").focus();
+  }
+
   function filtrarPorDocumento(doc){
     $("doc-consulta").value = String(doc.id);
-    gravarLocal("pref_documento", String(doc.id));
+    mostrarFiltro();
     window.scrollTo({ top:0, behavior:"smooth" });
     $("pergunta").focus({ preventScroll:true });
     avisar(`Consultando só em “${doc.titulo}”.`);
@@ -721,7 +723,6 @@
     if(!pergunta){ avisar("Digite uma pergunta."); campo.focus(); return; }
     const btn = $("btn-consultar");
     if(btn.disabled) return;
-    const provedor = $("provedor").value;
     const idDoc = $("doc-consulta").value || null;
 
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Consultando…';
@@ -729,7 +730,7 @@
     mostrarCarregando();
     const res = await chamar("/consultar", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ pergunta, provedor, id_documento: idDoc ? Number(idDoc) : null })
+      body: JSON.stringify({ pergunta, id_documento: idDoc ? Number(idDoc) : null })
     });
     btn.disabled = false; btn.textContent = "Consultar";
     if(!res.ok){ $("resposta-box").classList.add("hidden"); avisar(res.mensagem, true); return; }
@@ -879,6 +880,10 @@
     $("resposta-box").classList.add("hidden");
     respostaAtual = null;
     marcarHistoricoAtivo(null);
+    // volta a buscar em todos os documentos, com o filtro escondido
+    $("doc-consulta").value = "";
+    $("filtro-doc").classList.add("hidden");
+    $("btn-filtro").classList.remove("hidden");
   }
 
   /* ───── Upload ───── */
@@ -989,6 +994,7 @@
       const sel = $("doc-consulta");
       sel.value = String(s.id_documento);
       if(sel.value !== String(s.id_documento)) sel.value = "";
+      if(sel.value) mostrarFiltro();
       $("pergunta").focus();
     }));
   }
