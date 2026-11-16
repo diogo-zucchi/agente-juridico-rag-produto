@@ -224,6 +224,47 @@ def rotulo_do_artigo(chunk: str) -> str | None:
     return _normalizar(chunk[: m.end()]) if m else None
 
 
+def chave_do_artigo(texto: str) -> str | None:
+    """
+    Chave canônica do artigo no início do texto (um rótulo ou um chunk):
+    'Art. 20.' -> '20', 'Art. 1o' e 'Art. 1º' -> '1', 'Art. 6o-B.' -> '6-B'.
+    O rótulo guardado nos chunks varia (ordinal 'o' ou 'º', ponto final ou
+    não); a chave é o que serve para comparar artigos entre si.
+    """
+    m = _PADROES[0][1].match(texto)
+    if not m:
+        return None
+    numero, letra = int(m.group(2)), m.group(3)
+    return f"{numero}-{letra}" if letra else str(numero)
+
+
+# ─────────────────────────────────────────────
+# Artigos citados numa pergunta
+# ─────────────────────────────────────────────
+# número do artigo: "21", "1º", "1o", "6º-B", "124-B", "6-b". O hífen com
+# espaços ("6º - B") só vale com letra maiúscula, para "art. 20 - a lei..."
+# não virar Art. 20-A. "1.000" não é lido como Art. 1.
+_REF_ARTIGO = r"(\d+)(?!\.\d)(?:[º°]|o\b)?(?:\s*-\s*([A-Z])\b|-([a-z])\b)?"
+_NUMERO_ARTIGO = re.compile(_REF_ARTIGO)
+# "Art. 21", "art 21", "artigo 21", "arts. 20 e 21", "artigos 20, 21 ou 22"
+_CITACAO = re.compile(
+    rf"\b(?i:art(?:igos?|s)?)\.?\s*{_REF_ARTIGO}"
+    rf"(?:\s*(?:,|\be\b|\bou\b)\s*{_REF_ARTIGO})*"
+)
+
+
+def artigos_citados(texto: str) -> List[str]:
+    """Chaves (formato de chave_do_artigo) dos artigos citados, na ordem e sem repetir."""
+    chaves: List[str] = []
+    for citacao in _CITACAO.finditer(texto):
+        for m in _NUMERO_ARTIGO.finditer(citacao.group(0)):
+            letra = (m.group(2) or m.group(3) or "").upper()
+            chave = f"{int(m.group(1))}-{letra}" if letra else str(int(m.group(1)))
+            if chave not in chaves:
+                chaves.append(chave)
+    return chaves
+
+
 def juntar_artigo(chunks: List[str]) -> str:
     """Remonta o artigo a partir dos seus chunks em ordem, sem o caput repetido."""
     if not chunks:

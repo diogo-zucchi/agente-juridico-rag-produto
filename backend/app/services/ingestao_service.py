@@ -25,7 +25,8 @@ from app.models.models import (
     RespostaDocumento,
 )
 from app.services.texto_legal import (
-    dividir_artigo, eh_texto_legal, extrair_artigos, juntar_artigo, rotulo_do_artigo,
+    chave_do_artigo, dividir_artigo, eh_texto_legal, extrair_artigos, juntar_artigo,
+    rotulo_do_artigo,
 )
 
 settings = get_settings()
@@ -356,3 +357,38 @@ def texto_do_artigo(db: Session, id_documento: int, rotulo: str) -> str:
     # startswith("Art. 1") também pega "Art. 10": confere o rótulo exato
     textos = [t for t in db.scalars(stmt).all() if rotulo_do_artigo(t) == rotulo]
     return juntar_artigo(textos)
+
+
+def buscar_artigos(
+    db: Session,
+    chaves: List[str],
+    ids_documentos: List[int] | None = None,
+) -> List[Tuple[str, Chunk]]:
+    """
+    Busca exata de artigos pelo número (chaves no formato de chave_do_artigo,
+    como '21' ou '6-B'). Devolve (chave, primeiro chunk do artigo) para cada
+    documento que tem o artigo, em ordem de documento. Sem ids_documentos,
+    procura em todos.
+
+    O banco filtra pelo número ("Art. 21" seguido de algo que não seja
+    dígito, para não pegar o Art. 210); a letra e o ordinal são conferidos
+    aqui, com a mesma regra usada na ingestão.
+    """
+    if not chaves or ids_documentos == []:
+        return []
+    numeros = sorted({c.split("-")[0] for c in chaves}, key=int)
+    padrao = rf"^Art\.?\s*({'|'.join(numeros)})(\D|$)"
+    stmt = (
+        select(Chunk)
+        .where(Chunk.texto_chunk.regexp_match(padrao))
+        .order_by(Chunk.id_documento, Chunk.indice_chunk)
+    )
+    if ids_documentos is not None:
+        stmt = stmt.where(Chunk.id_documento.in_(ids_documentos))
+
+    primeiros: dict = {}
+    for chunk in db.scalars(stmt).all():
+        chave = chave_do_artigo(chunk.texto_chunk)
+        if chave in chaves:
+            primeiros.setdefault((chunk.id_documento, chave), chunk)
+    return [(chave, chunk) for (_, chave), chunk in primeiros.items()]

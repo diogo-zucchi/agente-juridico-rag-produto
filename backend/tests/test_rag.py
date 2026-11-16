@@ -325,6 +325,7 @@ class TestRagService:
             "fonte": "Planalto",
             "texto_chunk": "Parecer sem artigos.",
             "score": 0.9,
+            "exato": False,
         }]
 
     def _chunk(self, id_, texto):
@@ -814,3 +815,245 @@ class TestSugestoes:
         with patch("app.api.routes.rag_service.gerar_sugestoes", return_value=[]) as gerar:
             assert TestClient(app).get("/api/v1/sugestoes?limite=50").json() == []
         assert gerar.call_args.kwargs["limite"] == 10
+
+
+# ─────────────────────────────────────────────
+# Testes de artigos citados pelo número
+# ─────────────────────────────────────────────
+
+PASTA_LEIS = os.path.join(os.path.dirname(__file__), "..", "..", "leis")
+
+
+class TestCitacaoDeArtigos:
+    @pytest.mark.parametrize("pergunta, chaves", [
+        ("O que diz o Art. 21 da Lei 8.742/93?", ["21"]),
+        ("o que diz o art 21?", ["21"]),
+        ("e o artigo 21?", ["21"]),
+        ("ART. 21", ["21"]),
+        ("art.21", ["21"]),
+        ("Art. 1º", ["1"]),
+        ("art. 1o", ["1"]),
+        ("Art. 1°", ["1"]),
+        ("Art. 6º-B", ["6-B"]),
+        ("art. 6o-b", ["6-B"]),
+        ("Art. 6º - B", ["6-B"]),
+        ("artigo 124-B", ["124-B"]),
+        ("arts. 20 e 21", ["20", "21"]),
+        ("artigos 20, 21 ou 22", ["20", "21", "22"]),
+        ("§ 3º do art. 20 e o art. 21-A", ["20", "21-A"]),
+        ("Art. 20 e art. 20.", ["20"]),
+    ])
+    def test_detecta_e_normaliza(self, pergunta, chaves):
+        from app.services.texto_legal import artigos_citados
+        assert artigos_citados(pergunta) == chaves
+
+    @pytest.mark.parametrize("pergunta, chaves", [
+        ("Quem tem direito ao BPC?", []),
+        ("O que diz a Lei 8.742/93?", []),
+        ("parte 21 do texto", []),
+        ("art. 1.000 do Código Civil", []),         # milhar não vira Art. 1
+        ("art. 20 - a lei diz", ["20"]),            # " - a" não é a letra do artigo
+        ("art. 20, inciso I", ["20"]),
+    ])
+    def test_nao_inventa_citacoes(self, pergunta, chaves):
+        from app.services.texto_legal import artigos_citados
+        assert artigos_citados(pergunta) == chaves
+
+    def test_chave_do_rotulo(self):
+        from app.services.texto_legal import chave_do_artigo
+        assert chave_do_artigo("Art. 20.") == chave_do_artigo("Art. 20") == "20"
+        assert chave_do_artigo("Art. 1o") == chave_do_artigo("Art. 1º") == "1"
+        assert chave_do_artigo("Art. 6o-B.") == chave_do_artigo("Art. 6º-B") == "6-B"
+        assert chave_do_artigo("Art. 210. Texto") == "210"
+        assert chave_do_artigo("Parágrafo solto") is None
+
+    @pytest.mark.parametrize("arquivo", ["lei_8742_93.txt", "lei_8213_91.txt", "lc_142_2013.txt"])
+    def test_citacao_bate_com_os_rotulos_das_leis(self, arquivo):
+        """
+        Para cada artigo das leis reais, a pergunta que o cita (no formato da
+        sugestão, em minúsculas e por extenso) dá a mesma chave do rótulo do chunk.
+        """
+        from pathlib import Path
+        from app.services.rag_service import _pergunta_sobre
+        from app.services.texto_legal import artigos_citados, chave_do_artigo, rotulo_do_artigo
+        caminho = Path(PASTA_LEIS) / arquivo
+        if not caminho.exists():
+            pytest.skip("arquivo da lei ausente")
+
+        chunks = _dividir_em_chunks(caminho.read_text(encoding="utf-8"))
+        rotulos = {r for r in map(rotulo_do_artigo, chunks) if r}
+        assert len(rotulos) > 10
+
+        chaves = {}
+        for rotulo in rotulos:
+            chave = chave_do_artigo(rotulo)
+            # um rótulo por artigo: comparar pela chave não junta artigos diferentes
+            assert chaves.setdefault(chave, rotulo) == rotulo
+            perguntas = [
+                _pergunta_sobre("Lei X", rotulo),
+                f"o que diz o {rotulo.lower()} da lei?",
+                f"o que diz o {rotulo.replace('Art.', 'artigo')} da lei?",
+            ]
+            for pergunta in perguntas:
+                assert artigos_citados(pergunta) == [chave], (rotulo, pergunta)
+
+    def test_rotulos_reais_com_ordinal_e_letra(self):
+        from pathlib import Path
+        from app.services.texto_legal import artigos_citados, chave_do_artigo, rotulo_do_artigo
+        caminho = Path(PASTA_LEIS) / "lei_8742_93.txt"
+        if not caminho.exists():
+            pytest.skip("arquivo da lei ausente")
+        rotulos = {rotulo_do_artigo(c) for c in _dividir_em_chunks(caminho.read_text(encoding="utf-8"))}
+
+        # no Planalto o mesmo texto usa "o" e "º" como ordinal
+        assert {"Art. 6o-B.", "Art. 6º-F", "Art. 2o", "Art. 1º"} <= rotulos
+        assert chave_do_artigo("Art. 6o-B.") == artigos_citados("art. 6º-B")[0] == "6-B"
+        assert chave_do_artigo("Art. 2o") == artigos_citados("Art. 2º")[0] == "2"
+
+
+class TestBuscaDeArtigos:
+    def _chunk(self, id_, id_documento, texto):
+        return MagicMock(id=id_, id_documento=id_documento, texto_chunk=texto)
+
+    def _buscar(self, chunks, chaves, ids=None):
+        from app.services.ingestao_service import buscar_artigos
+        db = MagicMock()
+        db.scalars.return_value.all.return_value = chunks
+        return buscar_artigos(db, chaves, ids), db
+
+    def test_filtra_pelo_numero_no_banco(self):
+        from sqlalchemy.dialects import postgresql
+        _, db = self._buscar([], ["21", "6-B"], ids=[3])
+        stmt = db.scalars.call_args[0][0]
+        compilado = stmt.compile(dialect=postgresql.dialect())
+        sql = str(compilado)
+        assert "~" in sql
+        assert "chunks.id_documento IN" in sql
+        assert r"^Art\.?\s*(6|21)(\D|$)" in compilado.params.values()
+
+    def test_um_chunk_por_artigo_e_documento(self):
+        chunks = [
+            self._chunk(1, 1, "Art. 21. Caput."),
+            self._chunk(2, 1, "Art. 21. Caput.\n§ 1º Continuação."),
+            self._chunk(3, 1, "Art. 21-A. Outro artigo."),
+            self._chunk(4, 1, "Art. 210. Outro artigo."),
+            self._chunk(5, 2, "Art. 21 Caput de outra lei."),
+        ]
+        resultado, _ = self._buscar(chunks, ["21"])
+        assert [(chave, c.id) for chave, c in resultado] == [("21", 1), ("21", 5)]
+
+    def test_letra_e_ordinal(self):
+        chunks = [self._chunk(1, 1, "Art. 6o-B. Texto."), self._chunk(2, 1, "Art. 6o Texto.")]
+        resultado, _ = self._buscar(chunks, ["6-B"])
+        assert [c.id for _, c in resultado] == [1]
+
+    def test_sem_chaves_nao_consulta(self):
+        resultado, db = self._buscar([], [])
+        assert resultado == []
+        db.scalars.assert_not_called()
+
+
+class TestRecuperacaoComArtigoCitado:
+    def _chunk(self, id_, id_documento, texto, titulo="Lei"):
+        chunk = MagicMock(id=id_, id_documento=id_documento, texto_chunk=texto)
+        chunk.documento.titulo = titulo
+        chunk.documento.fonte.nome = "Planalto"
+        return chunk
+
+    def _recuperar(self, pergunta, exatos, semanticos, k=5, id_documento=None):
+        from app.services import rag_service
+        db = MagicMock()
+        with patch.object(rag_service, "buscar_artigos", return_value=exatos) as artigos, \
+             patch.object(rag_service, "buscar_chunks", return_value=semanticos) as semantica, \
+             patch.object(rag_service, "texto_do_artigo",
+                          side_effect=lambda db, doc, rotulo: f"{rotulo} (doc {doc})"):
+            fontes = rag_service._recuperar_chunks(db, pergunta, k, id_documento)
+        return fontes, artigos, semantica
+
+    def test_artigo_citado_vem_primeiro(self):
+        art21 = self._chunk(1, 3, "Art. 21. Caput.")
+        outro = self._chunk(2, 3, "Art. 20. O benefício de prestação continuada...")
+        fontes, artigos, _ = self._recuperar(
+            "O que diz o Art. 21?", [("21", art21)], [(outro, 0.71)], id_documento=3)
+
+        assert artigos.call_args.args[1:] == (["21"], [3])
+        assert [(f["chunk_id"], f["score"], f["exato"]) for f in fontes] == \
+            [(1, 1.0, True), (2, 0.71, False)]
+        assert fontes[0]["texto_chunk"] == "Art. 21. (doc 3)"
+
+    def test_nao_duplica_com_a_busca_semantica(self):
+        art21 = self._chunk(1, 3, "Art. 21. Caput.")
+        art21_par = self._chunk(2, 3, "Art. 21. Caput.\n§ 1º Parágrafo.")   # mesmo artigo
+        outro = self._chunk(3, 3, "Art. 20. Texto.")
+        fontes, _, _ = self._recuperar(
+            "art. 21", [("21", art21)], [(art21_par, 0.8), (art21, 0.7), (outro, 0.6)],
+            id_documento=3)
+        assert [f["chunk_id"] for f in fontes] == [1, 3]
+        assert [f["exato"] for f in fontes] == [True, False]
+
+    def test_varios_artigos_na_ordem_da_citacao(self):
+        art20 = self._chunk(1, 3, "Art. 20. Texto.")
+        art21 = self._chunk(2, 3, "Art. 21. Texto.")
+        # a busca no banco devolve na ordem do documento; vale a da pergunta
+        fontes, _, _ = self._recuperar(
+            "arts. 21 e 20", [("20", art20), ("21", art21)], [], id_documento=3)
+        assert [f["chunk_id"] for f in fontes] == [2, 1]
+
+    def test_total_continua_limitado_a_k(self):
+        exatos = [(str(n), self._chunk(n, 3, f"Art. {n}. Texto.")) for n in (20, 21)]
+        fontes, _, semantica = self._recuperar(
+            "arts. 20 e 21", exatos, [(self._chunk(9, 3, "Art. 9. X"), 0.9)], k=2, id_documento=3)
+        assert [f["chunk_id"] for f in fontes] == [20, 21]
+        # as vagas acabaram: nem gera o embedding da pergunta
+        semantica.assert_not_called()
+
+    DOCUMENTOS = [(1, "Lei 8.742/93"), (2, "Lei 8.213/91"), (3, "Lc 142 2013"), (4, "Lei 9.999/99")]
+
+    @pytest.mark.parametrize("pergunta", [
+        "O que diz o art. 21?",
+        # mesmo citando a lei, vem o artigo de cada uma: quem escolhe é o LLM
+        "O que diz o Art. 21 da Lei 8.742/93?",
+        "art. 21 da LOAS",
+    ])
+    def test_sem_documento_traz_o_artigo_de_cada_lei(self, pergunta):
+        exatos = [("21", self._chunk(d, d, "Art. 21. Texto.", titulo=t)) for d, t in self.DOCUMENTOS]
+        fontes, artigos, _ = self._recuperar(pergunta, exatos, [])
+
+        assert artigos.call_args.args[1:] == (["21"], None)
+        # limitado a MAX_DOCUMENTOS_POR_ARTIGO; o título distingue as leis
+        assert [f["titulo"] for f in fontes] == ["Lei 8.742/93", "Lei 8.213/91", "Lc 142 2013"]
+        assert all(f["exato"] for f in fontes)
+
+    def test_titulo_da_lei_chega_ao_llm(self):
+        from app.services.rag_service import PROMPT_JURIDICO, _montar_contexto
+        fontes = [{"titulo": "Lei 8.742/93", "fonte": "Planalto", "texto_chunk": "Art. 21. A"},
+                  {"titulo": "Lei 8.213/91", "fonte": "Planalto", "texto_chunk": "Art. 21. B"}]
+        contexto = _montar_contexto(fontes)
+        assert "[Documento 1] Lei 8.742/93" in contexto
+        assert "[Documento 2] Lei 8.213/91" in contexto
+        assert "lei específica" in PROMPT_JURIDICO
+
+    def test_artigo_inexistente_segue_com_a_semantica(self):
+        outro = self._chunk(7, 3, "Art. 20. Texto.")
+        fontes, _, semantica = self._recuperar("O que diz o art. 999?", [], [(outro, 0.5)],
+                                               id_documento=3)
+        semantica.assert_called_once()
+        assert [(f["chunk_id"], f["score"], f["exato"]) for f in fontes] == [(7, 0.5, False)]
+
+    def test_pergunta_sem_artigo_nao_consulta_artigos(self):
+        _, artigos, _ = self._recuperar("Quem tem direito ao BPC?", [], [])
+        artigos.assert_not_called()
+
+    def test_historico_marca_o_artigo_citado(self):
+        from datetime import datetime
+        from app.services import rag_service
+        art21 = self._chunk(1, 3, "Art. 21. Texto.")
+        art20 = self._chunk(2, 3, "Art. 20. Texto.")
+        consulta = MagicMock(id=1, pergunta="O que diz o art. 21?", data_hora=datetime(2026, 1, 1))
+        consulta.resposta.documentos_utilizados = [
+            MagicMock(id=1, chunk=art21, score=1.0), MagicMock(id=2, chunk=art20, score=0.6)]
+        db = MagicMock()
+        db.get.return_value = consulta
+        with patch.object(rag_service, "texto_do_artigo", return_value="Art. x"):
+            r = rag_service.obter_consulta(db, 1)
+        assert [f["exato"] for f in r["fontes"]] == [True, False]

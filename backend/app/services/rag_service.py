@@ -9,12 +9,15 @@ from app.core.config import get_settings
 from app.models.models import (
     STATUS_CONCLUIDO, Chunk, Consulta, Documento, Resposta, RespostaDocumento,
 )
-from app.services.ingestao_service import buscar_chunks, texto_do_artigo
-from app.services.texto_legal import rotulo_do_artigo
+from app.services.ingestao_service import buscar_artigos, buscar_chunks, texto_do_artigo
+from app.services.texto_legal import (
+    artigos_citados, chave_do_artigo, rotulo_do_artigo,
+)
 
 PROMPT_JURIDICO = """Você é um assistente jurídico especializado no direito brasileiro.
 Utilize EXCLUSIVAMENTE os trechos de documentos jurídicos fornecidos abaixo.
 Nunca invente informações. Se a resposta não estiver nos documentos, diga claramente.
+Se a pergunta se referir a uma lei específica, use apenas os documentos dessa lei.
 Sempre indique as fontes utilizadas, citando o número do documento entre colchetes, como [1].
 
 === DOCUMENTOS JURÍDICOS RECUPERADOS ===
@@ -111,22 +114,73 @@ def _recuperar_chunks(
     Chunks de lei são buscados pequenos (embedding mais preciso), mas o LLM
     recebe o artigo inteiro: assim, achar o § 5º do Art. 16 traz também os
     incisos do caput. Artigos repetidos contam uma vez só (com o maior score).
+
+    Artigos citados pelo número na pergunta ("Art. 21", "arts. 20 e 21")
+    entram primeiro, com o texto exato (ver _artigos_citados): o número não
+    tem significado para o embedding. A busca semântica completa as vagas.
     """
     max_chars = get_settings().artigo_max_chars
+    fontes: List[Dict] = []
+    vistos = set()
+
+    def incluir(chunk: Chunk, score: float, exato: bool) -> bool:
+        """Acrescenta a fonte se for nova; devolve True quando as k vagas acabam."""
+        texto, chave = _texto_expandido(db, chunk, max_chars)
+        if chave not in vistos:
+            vistos.add(chave)
+            fontes.append(_descrever_fonte(chunk, texto, score, exato))
+        return len(fontes) == k
+
+    for chunk in _artigos_citados(db, pergunta, k, id_documento):
+        if incluir(chunk, SCORE_EXATO, exato=True):
+            return fontes
+
     # busca mais candidatos, porque vários podem ser do mesmo artigo
     resultados = buscar_chunks(db, pergunta, top_k=k * 3, id_documento=id_documento)
-
-    chunks_com_score = []
-    vistos = set()
     for chunk, score in resultados:
-        texto, chave = _texto_expandido(db, chunk, max_chars)
-        if chave in vistos:
-            continue
-        vistos.add(chave)
-        chunks_com_score.append(_descrever_fonte(chunk, texto, score))
-        if len(chunks_com_score) == k:
+        if incluir(chunk, score, exato=False):
             break
-    return chunks_com_score
+    return fontes
+
+
+# ─────────────────────────────────────────────
+# Artigos citados pelo número
+# ─────────────────────────────────────────────
+# score do artigo citado: o máximo da escala, acima de qualquer resultado
+# semântico (produto interno entre embeddings normalizados, no máximo 1)
+SCORE_EXATO = 1.0
+# sem documento definido, quantas leis podem trazer o mesmo artigo
+MAX_DOCUMENTOS_POR_ARTIGO = 3
+
+
+def _artigos_citados(
+    db: Session,
+    pergunta: str,
+    k: int,
+    id_documento: int | None = None,
+) -> List[Chunk]:
+    """
+    Primeiro chunk de cada artigo citado na pergunta, na ordem da citação.
+
+    Com id_documento, o artigo é buscado só nele. Sem ele, vem o artigo de
+    cada documento que o tiver (até MAX_DOCUMENTOS_POR_ARTIGO por artigo),
+    cada um com o título da sua lei no contexto. Não há regra para adivinhar
+    de qual lei a pergunta fala: quem escolhe é o LLM, que entende "LOAS",
+    "Lei 8.742/93" ou "Lei de Benefícios" sem depender de como o título foi
+    escrito. Artigo citado que não existe nos documentos é ignorado.
+    """
+    chaves = artigos_citados(pergunta)
+    if not chaves:
+        return []
+
+    ids = [id_documento] if id_documento is not None else None
+    por_chave: Dict[str, List[Chunk]] = {}
+    for chave, chunk in buscar_artigos(db, chaves, ids):
+        por_chave.setdefault(chave, []).append(chunk)
+
+    limite = None if ids else MAX_DOCUMENTOS_POR_ARTIGO
+    exatos = [chunk for chave in chaves for chunk in por_chave.get(chave, [])[:limite]]
+    return exatos[:k]
 
 
 def _texto_expandido(db: Session, chunk: Chunk, max_chars: int) -> Tuple[str, tuple]:
@@ -139,7 +193,7 @@ def _texto_expandido(db: Session, chunk: Chunk, max_chars: int) -> Tuple[str, tu
     return chunk.texto_chunk, ("chunk", chunk.id)
 
 
-def _descrever_fonte(chunk: Chunk, texto: str, score: float) -> Dict:
+def _descrever_fonte(chunk: Chunk, texto: str, score: float, exato: bool = False) -> Dict:
     doc = chunk.documento
     return {
         "chunk_id": chunk.id,
@@ -147,6 +201,8 @@ def _descrever_fonte(chunk: Chunk, texto: str, score: float) -> Dict:
         "fonte": doc.fonte.nome if doc and doc.fonte else "Fonte desconhecida",
         "texto_chunk": texto,
         "score": score,
+        # artigo citado pelo número na pergunta (não veio da busca semântica)
+        "exato": exato,
     }
 
 
@@ -265,6 +321,7 @@ def obter_consulta(db: Session, id_consulta: int) -> Optional[Dict[str, Any]]:
         return None
     resposta = consulta.resposta
     max_chars = get_settings().artigo_max_chars
+    citados = set(artigos_citados(consulta.pergunta or ""))
 
     fontes = []
     usados = sorted(resposta.documentos_utilizados, key=lambda u: u.id) if resposta else []
@@ -279,7 +336,10 @@ def obter_consulta(db: Session, id_consulta: int) -> Optional[Dict[str, Any]]:
             })
             continue
         texto, _ = _texto_expandido(db, usado.chunk, max_chars)
-        fontes.append(_descrever_fonte(usado.chunk, texto, usado.score))
+        # o vínculo não guarda se a fonte foi um artigo citado: deduz pela
+        # pergunta salva e pelo score do acerto exato
+        exato = usado.score == SCORE_EXATO and chave_do_artigo(usado.chunk.texto_chunk) in citados
+        fontes.append(_descrever_fonte(usado.chunk, texto, usado.score, exato))
 
     return {
         "consulta_id": consulta.id,
