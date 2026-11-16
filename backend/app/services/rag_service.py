@@ -1,17 +1,21 @@
-from typing import List, Dict, Any, Callable
-from openai import OpenAI
+import re
+from typing import List, Dict, Any, Callable, Optional, Tuple
+from openai import OpenAI, OpenAIError
 from loguru import logger
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.models import Consulta, Resposta, RespostaDocumento
+from app.models.models import (
+    STATUS_CONCLUIDO, Chunk, Consulta, Documento, Resposta, RespostaDocumento,
+)
 from app.services.ingestao_service import buscar_chunks, texto_do_artigo
 from app.services.texto_legal import rotulo_do_artigo
 
 PROMPT_JURIDICO = """Você é um assistente jurídico especializado no direito brasileiro.
 Utilize EXCLUSIVAMENTE os trechos de documentos jurídicos fornecidos abaixo.
 Nunca invente informações. Se a resposta não estiver nos documentos, diga claramente.
-Sempre indique as fontes utilizadas na sua resposta.
+Sempre indique as fontes utilizadas, citando o número do documento entre colchetes, como [1].
 
 === DOCUMENTOS JURÍDICOS RECUPERADOS ===
 {contexto}
@@ -23,6 +27,12 @@ Resposta fundamentada:"""
 
 # Provedores de LLM suportados
 PROVEDORES = ("maritaca", "openai")
+NOMES_PROVEDORES = {"maritaca": "Maritaca", "openai": "OpenAI"}
+
+
+class ErroProvedor(Exception):
+    """Falha de um serviço externo (LLM ou embeddings). A rota responde 502
+    com esta mensagem, e nada é gravado no histórico."""
 
 # Cache de invocadores por provedor (criados sob demanda)
 _llms: Dict[str, Callable[[str], str]] = {}
@@ -109,28 +119,35 @@ def _recuperar_chunks(
     chunks_com_score = []
     vistos = set()
     for chunk, score in resultados:
-        texto, chave = chunk.texto_chunk, ("chunk", chunk.id)
-        rotulo = rotulo_do_artigo(chunk.texto_chunk)
-        if rotulo:
-            artigo = texto_do_artigo(db, chunk.id_documento, rotulo)
-            if artigo and len(artigo) <= max_chars:
-                texto, chave = artigo, ("artigo", chunk.id_documento, rotulo)
+        texto, chave = _texto_expandido(db, chunk, max_chars)
         if chave in vistos:
             continue
         vistos.add(chave)
-
-        doc = chunk.documento
-        fonte = doc.fonte.nome if doc and doc.fonte else "Fonte desconhecida"
-        chunks_com_score.append({
-            "chunk_id": chunk.id,
-            "titulo": doc.titulo if doc else "Documento",
-            "fonte": fonte,
-            "texto_chunk": texto,
-            "score": score,
-        })
+        chunks_com_score.append(_descrever_fonte(chunk, texto, score))
         if len(chunks_com_score) == k:
             break
     return chunks_com_score
+
+
+def _texto_expandido(db: Session, chunk: Chunk, max_chars: int) -> Tuple[str, tuple]:
+    """Texto entregue ao LLM: o artigo inteiro, se couber; senão, o chunk."""
+    rotulo = rotulo_do_artigo(chunk.texto_chunk)
+    if rotulo:
+        artigo = texto_do_artigo(db, chunk.id_documento, rotulo)
+        if artigo and len(artigo) <= max_chars:
+            return artigo, ("artigo", chunk.id_documento, rotulo)
+    return chunk.texto_chunk, ("chunk", chunk.id)
+
+
+def _descrever_fonte(chunk: Chunk, texto: str, score: float) -> Dict:
+    doc = chunk.documento
+    return {
+        "chunk_id": chunk.id,
+        "titulo": doc.titulo if doc else "Documento",
+        "fonte": doc.fonte.nome if doc and doc.fonte else "Fonte desconhecida",
+        "texto_chunk": texto,
+        "score": score,
+    }
 
 
 def _gerar_texto(provedor: str, chunks_com_score: List[Dict], pergunta: str) -> str:
@@ -146,7 +163,10 @@ def _gerar_texto(provedor: str, chunks_com_score: List[Dict], pergunta: str) -> 
         return _get_llm(provedor)(prompt)
     except Exception as e:
         logger.error(f"Erro ao chamar LLM {provedor}: {e}")
-        return f"Ocorreu um erro ao gerar a resposta com {provedor}. Verifique a chave de API e o modelo configurado."
+        raise ErroProvedor(
+            f"O modelo {NOMES_PROVEDORES[provedor]} não respondeu. "
+            "Verifique a chave de API e o modelo configurado, ou tente o outro modelo."
+        ) from e
 
 
 def _salvar_resposta(
@@ -187,7 +207,14 @@ def responder_pergunta(
     if provedor not in PROVEDORES:
         provedor = "maritaca"
 
-    fontes = _recuperar_chunks(db, pergunta, k, id_documento)
+    try:
+        fontes = _recuperar_chunks(db, pergunta, k, id_documento)
+    except OpenAIError as e:
+        logger.error(f"Erro ao gerar o embedding da pergunta: {e}")
+        raise ErroProvedor(
+            "Não foi possível consultar o serviço de embeddings. "
+            "Verifique a chave e o modelo de embeddings configurados."
+        ) from e
     texto = _gerar_texto(provedor, fontes, pergunta)
 
     consulta = Consulta(pergunta=pergunta, id_documento=id_documento)
@@ -224,3 +251,122 @@ def listar_historico(db: Session, limite: int = 20) -> List[Dict]:
         }
         for c in consultas
     ]
+
+
+def obter_consulta(db: Session, id_consulta: int) -> Optional[Dict[str, Any]]:
+    """
+    Uma consulta do histórico com a resposta salva e as fontes, na mesma
+    ordem em que foram entregues ao LLM (é ela que dá sentido às citações [n]).
+    Trechos que não existem mais (documento excluído ou reindexado) ficam
+    no lugar como indisponíveis, para não desalinhar a numeração.
+    """
+    consulta = db.get(Consulta, id_consulta)
+    if consulta is None:
+        return None
+    resposta = consulta.resposta
+    max_chars = get_settings().artigo_max_chars
+
+    fontes = []
+    usados = sorted(resposta.documentos_utilizados, key=lambda u: u.id) if resposta else []
+    for usado in usados:
+        if usado.chunk is None:
+            fontes.append({
+                "chunk_id": None,
+                "titulo": "Trecho indisponível",
+                "fonte": "O documento foi excluído ou reindexado",
+                "texto_chunk": "",
+                "score": usado.score,
+            })
+            continue
+        texto, _ = _texto_expandido(db, usado.chunk, max_chars)
+        fontes.append(_descrever_fonte(usado.chunk, texto, usado.score))
+
+    return {
+        "consulta_id": consulta.id,
+        "pergunta": consulta.pergunta,
+        "data_hora": consulta.data_hora.isoformat(),
+        "modelo_llm": resposta.modelo_llm if resposta else None,
+        "resposta": resposta.texto_resposta if resposta else None,
+        "fontes": fontes,
+    }
+
+
+# ─────────────────────────────────────────────
+# Sugestões de perguntas (a partir dos documentos indexados)
+# ─────────────────────────────────────────────
+# trechos curtos costumam ser artigos revogados ou de vigência ("Esta Lei
+# entra em vigor..."), que não rendem boas perguntas
+_MIN_CHARS_SUGESTAO = 200
+_FEMININOS = {"lei", "lc", "constituição", "constituicao", "emenda", "medida", "portaria",
+              "instrução", "instrucao", "resolução", "resolucao", "súmula", "sumula",
+              "norma", "consolidação", "consolidacao", "clt", "orientação", "orientacao"}
+_MASCULINOS = {"decreto", "decreto-lei", "código", "codigo", "estatuto", "parecer",
+               "regulamento", "provimento", "ato", "enunciado", "regimento"}
+
+
+def _artigo_definido(titulo: str) -> str:
+    """'da Lei…', 'do Decreto…' ou 'de …' conforme a primeira palavra do título."""
+    primeira = (titulo.split() or [""])[0].lower().strip(".,:;")
+    if primeira in _FEMININOS:
+        return "da"
+    if primeira in _MASCULINOS:
+        return "do"
+    return "de"
+
+
+def _pergunta_sobre(titulo: str, trecho: str) -> Optional[str]:
+    """Pergunta sobre o artigo no início do trecho, ou None se não houver artigo."""
+    rotulo = rotulo_do_artigo(trecho)
+    if not rotulo:
+        return None
+    # "Art. 1o" -> "Art. 1º" (textos do Planalto usam a letra o como ordinal)
+    rotulo = re.sub(r"(\d)o\b", r"\1º", rotulo.rstrip(". "))
+    return f"O que diz o {rotulo} {_artigo_definido(titulo)} {titulo}?"
+
+
+def gerar_sugestoes(db: Session, limite: int = 3) -> List[Dict[str, Any]]:
+    """
+    Perguntas sobre trechos sorteados dos documentos já indexados (em leis,
+    um artigo; nos demais, o documento todo), variando entre documentos.
+    Cada sugestão leva o id do documento, para a consulta ser feita nele.
+    """
+    linhas = db.execute(
+        select(Chunk.texto_chunk, Documento.id, Documento.titulo)
+        .join(Documento, Chunk.id_documento == Documento.id)
+        .where(Documento.status == STATUS_CONCLUIDO)
+        .where(func.length(Chunk.texto_chunk) >= _MIN_CHARS_SUGESTAO)
+        .order_by(func.random())
+        .limit(limite * 15)
+    ).all()
+
+    por_documento: Dict[int, List[Dict[str, Any]]] = {}
+    titulos: Dict[int, str] = {}
+    vistas = set()
+    for texto, id_documento, titulo in linhas:
+        titulos[id_documento] = titulo
+        pergunta = _pergunta_sobre(titulo, texto)
+        if pergunta is None or pergunta in vistas:
+            continue
+        vistas.add(pergunta)
+        por_documento.setdefault(id_documento, []).append(
+            {"pergunta": pergunta, "id_documento": id_documento}
+        )
+    # documento sem artigos (parecer, decisão…): uma pergunta geral sobre ele
+    for id_documento, titulo in titulos.items():
+        if id_documento not in por_documento:
+            por_documento[id_documento] = [{
+                "pergunta": f"Quais são os principais pontos {_artigo_definido(titulo)} {titulo}?",
+                "id_documento": id_documento,
+            }]
+
+    # intercala os documentos: uma sugestão de cada antes de repetir algum
+    sugestoes: List[Dict[str, Any]] = []
+    filas = list(por_documento.values())
+    while filas and len(sugestoes) < limite:
+        for fila in list(filas):
+            sugestoes.append(fila.pop(0))
+            if not fila:
+                filas.remove(fila)
+            if len(sugestoes) == limite:
+                break
+    return sugestoes

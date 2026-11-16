@@ -3,330 +3,989 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agente Jurídico RAG</title>
+  <meta name="color-scheme" content="dark" />
+  <title>Agente Jurídico</title>
   <style>
     :root {
-      --azul:    #1a3a5c;
-      --azul2:   #2563eb;
-      --cinza:   #f1f5f9;
-      --borda:   #cbd5e1;
-      --texto:   #1e293b;
-      --verde:   #16a34a;
-      --laranja: #ea580c;
-      }
+      --bg:        #0a0a0a;
+      --surface:   #101010;
+      --surface-2: #161616;
+      --line:      #1f1f1f;
+      --line-2:    #2c2c2c;
+      --text:      #ededed;
+      --muted:     #8a8a8a;
+      --faint:     #555;
+      --accent:    #fafafa;
+      --ok:        #8fbf9a;
+      --warn:      #d6c08a;
+      --err:       #d98a80;
+      --radius:    10px;
+      --ease:      cubic-bezier(.2, .7, .2, 1);
+      --font:      "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+      --serif:     "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-font-smoothing: antialiased; }
     body {
-      font-family: 'Segoe UI', sans-serif;
-      background: var(--cinza);
-      color: var(--texto);
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
+      font-size: 15px;
+      line-height: 1.5;
     }
+    ::selection { background: var(--accent); color: var(--bg); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 3px solid var(--bg); }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* ───── Cabeçalho ───── */
     header {
-      background: var(--azul);
-      color: white;
-      padding: 1.2rem 2rem;
-      display: flex; align-items: center; gap: 1rem;
-      box-shadow: 0 2px 8px rgba(0,0,0,.3);
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      /* alinha com a coluna de conteúdo (max-width 1120px) */
+      padding: 1rem max(2rem, calc((100% - 1120px) / 2 + 2rem));
+      background: rgba(10,10,10,.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
     }
-    header h1 { font-size: 1.3rem; font-weight: 700; }
-    header span { font-size: .85rem; opacity: .75; }
+    .marca { display: flex; align-items: center; gap: .75rem; }
+    .marca h1 { font-size: .95rem; font-weight: 600; letter-spacing: -.01em; }
+    .marca span { display: block; font-size: .75rem; color: var(--muted); }
+    .cabecalho-acoes { display: flex; align-items: center; gap: .5rem; }
 
+    .status {
+      display: inline-flex; align-items: center; gap: .5rem;
+      font-size: .75rem; color: var(--muted);
+      padding: .35rem .7rem; border: 1px solid var(--line); border-radius: 999px;
+    }
+    .status::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint);
+      transition: background .4s var(--ease);
+    }
+    .status.ok::before  { background: var(--ok); box-shadow: 0 0 0 3px rgba(143,191,154,.12); }
+    .status.err::before { background: var(--err); box-shadow: 0 0 0 3px rgba(217,138,128,.12); }
+
+    /* ───── Layout ───── */
     .container {
-      max-width: 1100px; margin: 1.2rem auto 0; padding: 1rem;
-      display: grid; grid-template-columns: 1fr 300px; gap: 1.5rem;
+      max-width: 1120px; margin: 0 auto; padding: 3rem 2rem 4rem;
+      display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 3rem;
     }
-    @media (max-width: 760px) { .container { grid-template-columns: 1fr; } }
-
-    .card {
-      background: white; border-radius: 12px; padding: 1.5rem;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 1.25rem;
+    @media (max-width: 860px) {
+      .container { grid-template-columns: minmax(0,1fr); gap: 2rem; padding: 2rem 1.25rem 3rem; }
+      header { padding: .9rem 1.25rem; }
     }
-    .card h2 { font-size: 1rem; color: var(--azul); margin-bottom: 1rem; }
+    @media (max-width: 560px) { .marca span { display: none; } .titulo-grande { font-size: 1.7rem; } }
 
-    textarea, select, input[type=text] {
-      width: 100%; border: 1.5px solid var(--borda); border-radius: 8px;
-      padding: .6rem .7rem; font-size: .93rem; font-family: inherit;
+    .secao { margin-bottom: 2.75rem; animation: surgir .6s var(--ease) both; }
+    .secao:nth-child(2) { animation-delay: .06s; }
+    aside .secao:nth-child(1) { animation-delay: .1s; }
+    aside .secao:nth-child(2) { animation-delay: .14s; }
+
+    .titulo-secao {
+      font-size: .7rem; font-weight: 500; text-transform: uppercase; letter-spacing: .12em;
+      color: var(--muted); margin-bottom: 1rem;
+      display: flex; align-items: center; gap: .75rem;
     }
-    textarea { height: 90px; resize: vertical; }
-    textarea:focus, select:focus, input:focus { outline: none; border-color: var(--azul2); }
-    label.lbl { display:block; font-size:.82rem; color:#475569; margin:.6rem 0 .25rem; font-weight:600; }
+    .titulo-secao::after { content: ""; flex: 1; height: 1px; background: var(--line); order: 1; }
+    .titulo-secao > .acao { order: 2; }
+    .titulo-secao > h3 { font: inherit; }
 
-    .btn-row { display: flex; gap: .75rem; margin-top: .75rem; flex-wrap: wrap; }
+    .titulo-grande {
+      font-family: var(--serif); font-weight: 400; font-size: 2rem; line-height: 1.15;
+      letter-spacing: -.01em; margin-bottom: .4rem;
+    }
+    .subtitulo { color: var(--muted); font-size: .9rem; margin-bottom: 1.75rem; }
+
+    /* ───── Sugestões ───── */
+    .sugestoes { display: flex; flex-wrap: wrap; gap: .5rem; margin: -.75rem 0 1.25rem; }
+    .sugestao {
+      background: transparent; color: var(--muted); border: 1px solid var(--line);
+      border-radius: 999px; padding: .4rem .8rem; font-size: .78rem; font-weight: 400;
+      animation: surgir .45s var(--ease) both;
+    }
+    .sugestao:hover { color: var(--text); border-color: var(--line-2); background: var(--surface); }
+
+    /* ───── Campos ───── */
+    textarea, select, input[type=text], input[type=password] {
+      width: 100%; background: var(--surface); color: var(--text);
+      border: 1px solid var(--line); border-radius: var(--radius);
+      padding: .7rem .85rem; font-size: .9rem; font-family: inherit;
+      transition: border-color .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
+    }
+    textarea::placeholder, input::placeholder { color: var(--faint); }
+    textarea:hover, select:hover, input:hover { border-color: var(--line-2); }
+    textarea:focus, select:focus, input:focus {
+      outline: none; border-color: #555; background: var(--surface-2);
+      box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+    }
+    textarea { min-height: 120px; resize: vertical; line-height: 1.6; font-size: 1rem; padding: 1rem 1.1rem; }
+    select {
+      appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 2.2rem;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%238a8a8a' stroke-width='1.4'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right .85rem center;
+    }
+    select option { background: var(--surface); color: var(--text); }
+    select option:disabled { color: var(--faint); }
+
+    label.lbl { display: block; font-size: .72rem; color: var(--muted); margin: 0 0 .4rem; letter-spacing: .02em; }
+    .campos { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; margin-top: .9rem; }
+    @media (max-width: 560px) { .campos { grid-template-columns: 1fr; } }
+
+    .compositor { position: relative; }
+    .atalho {
+      position: absolute; right: .8rem; bottom: .7rem; pointer-events: none;
+      font-size: .7rem; color: var(--faint);
+    }
+    @media (hover: none) { .atalho { display: none; } }
+    kbd {
+      font-family: inherit; font-size: .68rem; padding: .05rem .35rem;
+      border: 1px solid var(--line-2); border-radius: 4px; color: var(--muted);
+    }
+
+    /* ───── Botões ───── */
+    .btn-row { display: flex; gap: .6rem; margin-top: 1.25rem; flex-wrap: wrap; }
     button {
-      padding: .6rem 1.4rem; border: none; border-radius: 8px; cursor: pointer;
-      font-size: .9rem; font-weight: 600; transition: opacity .2s;
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      padding: .62rem 1.2rem; border-radius: var(--radius); cursor: pointer;
+      font-size: .85rem; font-weight: 500; font-family: inherit;
+      border: 1px solid transparent; background: none; color: inherit;
+      transition: background .2s var(--ease), color .2s var(--ease), border-color .2s var(--ease), transform .15s var(--ease), opacity .2s;
     }
-    button:hover { opacity: .88; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    .btn-primary { background: var(--azul2); color: white; }
-    .btn-outline { background: white; color: var(--azul); border: 1.5px solid var(--azul); }
+    button:active:not(:disabled) { transform: scale(.98); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+    .btn-primary { background: var(--accent); color: var(--bg); }
+    .btn-primary:hover:not(:disabled) { background: #d4d4d4; }
+    .btn-outline { background: transparent; color: var(--text); border-color: var(--line-2); }
+    .btn-outline:hover:not(:disabled) { border-color: #4a4a4a; background: var(--surface); }
+    .btn-perigo { background: var(--err); color: var(--bg); }
+    .btn-perigo:hover:not(:disabled) { background: #e6a39a; }
+    .btn-bloco { width: 100%; margin-top: .75rem; }
+    .btn-icone {
+      padding: .4rem; border-radius: 8px; color: var(--muted);
+    }
+    .btn-icone:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+    .btn-texto {
+      padding: .25rem .5rem; border-radius: 6px; font-size: .72rem; color: var(--muted);
+      text-transform: none; letter-spacing: 0;
+    }
+    .btn-texto:hover { color: var(--text); background: var(--surface); }
 
-    .resposta-texto {
-      background: #f8fafc; border: 1px solid var(--borda); border-radius: 8px;
-      padding: 1rem; white-space: pre-wrap; line-height: 1.65; font-size: .92rem;
-    }
-    .fonte-item {
-      background: #eff6ff; border-left: 4px solid var(--azul2);
-      border-radius: 0 6px 6px 0; padding: .6rem .9rem; margin-bottom: .5rem; font-size: .85rem;
-    }
-    .fonte-item strong { display: block; color: var(--azul); }
-    .score { color: var(--verde); font-weight: 600; font-size: .78rem; }
-
-    .ok  { color: var(--verde); }
-    .err { color: var(--laranja); }
-    .upload-area {
-      width: 100%; border-radius: 8px; padding: 1.2rem; text-align: center;
-      cursor: pointer; background: var(--cinza); display: flex;
-      flex-direction: column; align-items: center; gap: .4rem;
-    }
-    .upload-area input { display: none; }
-    #upload-status { font-size:.85rem; min-height:1.2em; margin-top:.5rem; }
-    .hist-item { padding:.55rem 0; border-bottom:1px solid var(--cinza); font-size:.83rem; cursor:pointer; }
-    .hist-item:hover { color: var(--azul2); }
-    .hist-data { font-size:.75rem; color:#94a3b8; }
     .spinner {
-      display:inline-block; width:16px; height:16px; border:2.5px solid rgba(255,255,255,.4);
-      border-top-color:white; border-radius:50%; animation:spin .7s linear infinite;
-      vertical-align:middle; margin-right:.4rem;
+      width: 13px; height: 13px; border-radius: 50%;
+      border: 1.5px solid rgba(0,0,0,.2); border-top-color: var(--bg);
+      animation: girar .7s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .hidden { display:none !important; }
-    .hint { font-size:.78rem; color:#94a3b8; }
+
+    /* ───── Resposta ───── */
+    #resposta-box { margin-top: 2.5rem; scroll-margin-top: 90px; }
+    #resposta-box.visivel { animation: surgir .5s var(--ease) both; }
+    .resposta-meta { font-size: .75rem; color: var(--faint); margin: -.5rem 0 1rem; }
+    .resposta-texto {
+      line-height: 1.8; font-size: .95rem; color: #dcdcdc;
+      padding-left: 1.25rem; border-left: 1px solid var(--line-2);
+      overflow-wrap: anywhere;
+    }
+    .resposta-texto > * + * { margin-top: .85rem; }
+    .resposta-texto h4 { font-size: .95rem; font-weight: 600; color: var(--text); margin-top: 1.25rem; }
+    .resposta-texto strong { color: var(--text); font-weight: 600; }
+    .resposta-texto ul, .resposta-texto ol { padding-left: 1.25rem; }
+    .resposta-texto li + li { margin-top: .35rem; }
+    .resposta-texto li::marker { color: var(--faint); }
+    .resposta-texto code { font-size: .85em; background: var(--surface-2); padding: .1rem .35rem; border-radius: 4px; }
+    .resposta-texto hr { border: 0; border-top: 1px solid var(--line); }
+    .cita {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 1.35rem; height: 1.15rem; padding: 0 .3rem; margin: 0 .1rem;
+      font-size: .68rem; font-weight: 500; vertical-align: .12em; line-height: 1;
+      border: 1px solid var(--line-2); border-radius: 5px; color: var(--muted);
+    }
+    .cita:hover { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+
+    .esqueleto { padding-left: 1.25rem; border-left: 1px solid var(--line-2); }
+    .esqueleto div {
+      height: 10px; border-radius: 4px; margin: .55rem 0 .95rem;
+      background: linear-gradient(90deg, #171717 0%, #262626 50%, #171717 100%);
+      background-size: 200% 100%; animation: brilho 1.4s ease-in-out infinite;
+    }
+    .esqueleto div:nth-child(2) { width: 92%; }
+    .esqueleto div:nth-child(3) { width: 84%; }
+    .esqueleto div:nth-child(4) { width: 60%; }
+
+    .bloco-resposta { margin-bottom: 2.25rem; }
+    .fontes { display: grid; gap: .5rem; }
+    .fonte-item {
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: .85rem 1rem; font-size: .83rem; scroll-margin-top: 90px;
+      transition: border-color .3s var(--ease), background .3s var(--ease);
+      animation: surgir .45s var(--ease) both;
+    }
+    .fonte-item:hover { border-color: var(--line-2); background: var(--surface-2); }
+    .fonte-item.destaque { border-color: #8a8a8a; background: var(--surface-2); }
+    .fonte-topo { display: flex; align-items: baseline; gap: .6rem; }
+    .fonte-num { font-variant-numeric: tabular-nums; color: var(--faint); font-size: .75rem; }
+    .fonte-item strong { font-weight: 500; color: var(--text); flex: 1; }
+    .fonte-meta { color: var(--muted); font-size: .75rem; margin-top: .15rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+    .score { font-variant-numeric: tabular-nums; }
+    .barra { width: 48px; height: 2px; background: var(--line-2); border-radius: 2px; overflow: hidden; }
+    .barra i { display: block; height: 100%; background: var(--accent); transform-origin: left; animation: crescer .8s var(--ease) both; }
+    .fonte-trecho {
+      margin-top: .5rem; color: var(--muted); line-height: 1.6; white-space: pre-wrap; cursor: pointer;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+    }
+    .fonte-item.aberta .fonte-trecho { display: block; -webkit-line-clamp: unset; line-clamp: unset; color: #bdbdbd; }
+    .fonte-mais { margin: .4rem 0 0 -.5rem; }
+
+    /* ───── Upload ───── */
+    .upload-area {
+      width: 100%; border: 1px dashed var(--line-2); border-radius: var(--radius);
+      padding: 1.6rem 1rem; text-align: center; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: .55rem;
+      transition: border-color .25s var(--ease), background .25s var(--ease);
+    }
+    .upload-area:hover, .upload-area.arrastando { border-color: #555; background: var(--surface); }
+    .upload-area.arrastando .upload-icone { transform: translateY(-3px); }
+    .upload-area input { display: none; }
+    .upload-icone { color: var(--muted); transition: transform .25s var(--ease); }
+    #upload-label { font-size: .8rem; color: var(--muted); line-height: 1.5; word-break: break-all; }
+    #upload-label em { font-style: normal; color: var(--faint); font-size: .72rem; }
+    #titulo-doc { margin-top: .75rem; }
+    #upload-status { font-size: .8rem; min-height: 1.2em; margin-top: .75rem; }
+
+    /* ───── Documentos ───── */
+    .doc-item {
+      display: flex; align-items: flex-start; gap: .7rem;
+      padding: .7rem .6rem; margin: 0 -.6rem; border-radius: 8px;
+      transition: background .2s var(--ease);
+      animation: surgir .4s var(--ease) both;
+    }
+    .doc-item + .doc-item { border-top: 1px solid var(--line); }
+    .doc-item:hover { background: var(--surface); }
+    .ponto { flex: none; width: 6px; height: 6px; border-radius: 50%; margin-top: .45rem; background: var(--ok); }
+    .ponto.processando { background: var(--warn); animation: pulsar 1.2s ease-in-out infinite; }
+    .ponto.erro { background: var(--err); }
+    .doc-info { flex: 1; min-width: 0; }
+    .doc-titulo {
+      display: block; width: 100%; text-align: left; padding: 0; border-radius: 4px;
+      font-size: .83rem; font-weight: 400; color: #d6d6d6;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    button.doc-titulo:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--faint); }
+    .doc-meta { font-size: .72rem; color: var(--faint); margin-top: .1rem; }
+    .doc-meta.err {
+      color: var(--err);
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+    }
+    .doc-acoes { display: flex; gap: .1rem; opacity: 0; transition: opacity .2s var(--ease); }
+    .doc-item:hover .doc-acoes, .doc-item:focus-within .doc-acoes, .doc-item.com-erro .doc-acoes { opacity: 1; }
+    @media (hover: none) { .doc-acoes { opacity: 1; } }
+    .doc-acoes .btn-icone { padding: .3rem; }
+
+    .ok   { color: var(--ok); }
+    .err  { color: var(--err); }
+    .hint { font-size: .8rem; color: var(--faint); }
+
+    /* ───── Histórico ───── */
+    .hist-item {
+      display: block; width: calc(100% + 1.5rem); text-align: left; font-weight: 400;
+      padding: .75rem; margin: 0 -.75rem; border-radius: 8px;
+      font-size: .85rem; color: #cfcfcf;
+      animation: surgir .4s var(--ease) both;
+    }
+    .hist-item + .hist-item { border-top: 1px solid var(--line); }
+    .hist-item:hover, .hist-item.ativo { background: var(--surface); color: var(--text); }
+    .hist-item:active:not(:disabled) { transform: none; }
+    .hist-item.ativo { box-shadow: inset 2px 0 0 var(--accent); }
+    .hist-data { display: block; font-size: .72rem; color: var(--faint); margin-top: .15rem; }
+
+    /* ───── Diálogos ───── */
+    dialog.dialogo {
+      margin: auto; width: min(420px, calc(100% - 2rem));
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--line-2); border-radius: 14px; padding: 1.5rem;
+      box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    }
+    dialog.dialogo[open] { animation: surgir-dialogo .25s var(--ease) both; }
+    dialog.dialogo::backdrop { background: rgba(0,0,0,.6); backdrop-filter: blur(3px); animation: aparecer .25s var(--ease) both; }
+    .dialogo h3 { font-family: var(--serif); font-weight: 400; font-size: 1.35rem; margin-bottom: .5rem; }
+    .dialogo-texto { font-size: .85rem; color: var(--muted); line-height: 1.6; margin-bottom: 1.1rem; }
+    .dialogo-acoes { display: flex; align-items: center; gap: .5rem; margin-top: 1.25rem; }
+    .dialogo-acoes .espaco { flex: 1; }
+
+    /* ───── Aviso flutuante ───── */
+    #aviso {
+      position: fixed; left: 50%; bottom: 1.5rem; z-index: 20;
+      max-width: calc(100% - 2rem);
+      transform: translate(-50%, 8px); opacity: 0; pointer-events: none;
+      background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius);
+      padding: .65rem 1rem; font-size: .83rem; color: var(--text);
+      transition: opacity .25s var(--ease), transform .25s var(--ease);
+    }
+    #aviso.visivel { opacity: 1; transform: translate(-50%, 0); }
+    #aviso.erro { border-color: rgba(217,138,128,.4); }
+
+    .hidden { display: none !important; }
+
+    @keyframes surgir  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes surgir-dialogo { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+    @keyframes aparecer { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes girar   { to { transform: rotate(360deg); } }
+    @keyframes brilho  { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+    @keyframes crescer { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    @keyframes pulsar  { 50% { opacity: .35; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body>
 
 <header>
-  <div>
-    <h1>Agente Jurídico Inteligente</h1>
-    <span>RAG — Retrieval-Augmented Generation</span>
+  <div class="marca">
+    <div>
+      <h1>Agente Jurídico</h1>
+      <span>Consulta com recuperação de documentos</span>
+    </div>
+  </div>
+  <div class="cabecalho-acoes">
+    <button id="btn-token" class="btn-icone hidden" title="Token de acesso" aria-label="Token de acesso" onclick="trocarToken()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3"/><path d="m17 6 3 3"/><path d="m14.5 8.5 2 2"/></svg>
+    </button>
+    <div id="api-status" class="status">Verificando…</div>
   </div>
 </header>
 
-<div class="container">
+<main class="container">
   <!-- ───────── CONSULTA ───────── -->
   <div>
-    <div class="card">
-      <h2>Consulta Jurídica</h2>
-      <label class="lbl">Pergunta</label>
-      <textarea id="pergunta" placeholder="Digite sua pergunta jurídica..."></textarea>
+    <section class="secao">
+      <h2 class="titulo-grande">O que você quer saber?</h2>
+      <p class="subtitulo">As respostas se baseiam apenas nos documentos indexados.</p>
 
-      <label class="lbl">Modelo de linguagem (LLM)</label>
-      <select id="provedor">
-        <option value="maritaca">Maritaca — Sabiá</option>
-        <option value="openai">ChatGPT (OpenAI)</option>
-      </select>
+      <div id="sugestoes" class="sugestoes hidden"></div>
 
-      <label class="lbl">Documento (opcional — deixe "Todos" para busca ampla)</label>
-      <select id="doc-consulta"><option value="">Todos os documentos</option></select>
+      <div class="compositor">
+        <textarea id="pergunta" aria-label="Pergunta" placeholder="Digite sua pergunta aqui"></textarea>
+        <span class="atalho"><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+      </div>
+
+      <div class="campos">
+        <div>
+          <label class="lbl" for="provedor">Modelo</label>
+          <select id="provedor">
+            <option value="maritaca">Maritaca — Sabiá</option>
+            <option value="openai">ChatGPT (OpenAI)</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl" for="doc-consulta">Documento</label>
+          <select id="doc-consulta"><option value="">Todos os documentos</option></select>
+        </div>
+      </div>
 
       <div class="btn-row">
         <button class="btn-primary" id="btn-consultar" onclick="consultar()">Consultar</button>
         <button class="btn-outline" onclick="limpar()">Limpar</button>
       </div>
 
-      <div id="resposta-box" class="hidden">
-        <h2 style="margin-top:1.25rem">Resposta</h2>
-        <div id="resposta-texto" class="resposta-texto"></div>
-        <h2 style="margin-top:1rem">Fontes Utilizadas</h2>
-        <div id="fontes-conteudo"></div>
+      <div id="resposta-box" class="hidden" aria-live="polite">
+        <div id="resposta-carregando" class="bloco-resposta hidden">
+          <h3 class="titulo-secao">Resposta</h3>
+          <div class="esqueleto"><div></div><div></div><div></div><div></div></div>
+        </div>
+        <div id="resposta-pronta" class="hidden">
+          <div class="bloco-resposta">
+            <div class="titulo-secao">
+              <h3>Resposta</h3>
+              <button id="btn-copiar" class="btn-texto acao" onclick="copiarResposta()">Copiar</button>
+            </div>
+            <p id="resposta-meta" class="resposta-meta"></p>
+            <div id="resposta-texto" class="resposta-texto"></div>
+          </div>
+          <div class="bloco-resposta">
+            <h3 class="titulo-secao">Fontes utilizadas</h3>
+            <div id="fontes-conteudo" class="fontes"></div>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Histórico de Consultas</h2>
-      <div id="historico-lista"><p class="hint">Carregando histórico...</p></div>
-    </div>
+    <section class="secao">
+      <h3 class="titulo-secao">Histórico</h3>
+      <div id="historico-lista"><p class="hint">Carregando histórico…</p></div>
+    </section>
   </div>
 
-  <!-- ───────── SIDEBAR ───────── -->
-  <div>
-    <div class="card">
-      <h2>Indexar Documento</h2>
+  <!-- ───────── LATERAL ───────── -->
+  <aside>
+    <section class="secao">
+      <h3 class="titulo-secao">Indexar documento</h3>
       <label class="upload-area" id="upload-area">
         <input type="file" id="arquivo-input" accept=".pdf,.txt,.html,.htm" onchange="atualizarNomeArquivo()" />
-        <div style="font-size:2rem">📄</div>
-        <p class="hint" id="upload-label">Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em></p>
+        <svg class="upload-icone" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-6"/><path d="M9.5 13.5 12 11l2.5 2.5"/>
+        </svg>
+        <p id="upload-label">Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em></p>
       </label>
-      <input type="text" id="titulo-doc" placeholder="Título do documento" style="margin-top:.6rem" />
-      <button class="btn-primary" style="width:100%;margin-top:.6rem" onclick="fazerUpload()">Indexar</button>
+      <input type="text" id="titulo-doc" aria-label="Título do documento" placeholder="Título do documento" />
+      <button class="btn-outline btn-bloco" onclick="fazerUpload()">Indexar</button>
       <div id="upload-status"></div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Status da API</h2>
-      <div id="api-status" class="hint">Verificando...</div>
+    <section class="secao">
+      <h3 class="titulo-secao">Documentos</h3>
+      <div id="documentos-lista"><p class="hint">Carregando…</p></div>
+    </section>
+  </aside>
+</main>
+
+<!-- token de acesso -->
+<dialog id="dlg-token" class="dialogo">
+  <form method="dialog">
+    <h3>Token de acesso</h3>
+    <p id="dlg-token-msg" class="dialogo-texto"></p>
+    <input type="password" id="dlg-token-input" autocomplete="off" placeholder="Cole o token aqui" aria-label="Token" />
+    <div class="dialogo-acoes">
+      <button type="button" id="dlg-token-remover" class="btn-texto" onclick="this.closest('dialog').close('remover')">Remover token</button>
+      <span class="espaco"></span>
+      <button type="button" class="btn-outline" onclick="this.closest('dialog').close('cancelar')">Cancelar</button>
+      <button value="salvar" class="btn-primary">Salvar</button>
     </div>
-  </div>
-</div>
+  </form>
+</dialog>
+
+<!-- confirmação genérica -->
+<dialog id="dlg-confirmar" class="dialogo">
+  <form method="dialog">
+    <h3 id="dlg-confirmar-titulo"></h3>
+    <p id="dlg-confirmar-texto" class="dialogo-texto"></p>
+    <div class="dialogo-acoes">
+      <span class="espaco"></span>
+      <button value="cancelar" class="btn-outline">Cancelar</button>
+      <button value="ok" id="dlg-confirmar-ok" class="btn-primary"></button>
+    </div>
+  </form>
+</dialog>
+
+<div id="aviso" role="status"></div>
 
 <script>
   // a página é servida pela própria API: caminhos relativos funcionam
   // tanto em localhost quanto no domínio hospedado
   const API_BASE = "/api/v1";
+  const ROTULO_UPLOAD = "Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em>";
+  const NOMES_MODELOS = { maritaca: "Maritaca", openai: "OpenAI" };
+  const $ = id => document.getElementById(id);
+
+  // estado da resposta exibida (usado para copiar e para as citações)
+  let respostaAtual = null;
+  // documento recém-enviado cuja indexação o painel de upload acompanha
+  let acompanhando = null;
+  let timerDocumentos = null;
+  let primeiraCargaDocs = true;
+  // sem consultas ainda: a página mostra sugestões tiradas dos documentos indexados
+  let historicoVazio = false;
 
   // escapa texto vindo do servidor antes de inserir em innerHTML
   function esc(v){
     return String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
-  // token de acesso (API_TOKEN do servidor), guardado neste navegador
-  function lerToken(){ try{ return localStorage.getItem("api_token") || ""; }catch{ return ""; } }
-  function salvarToken(t){ try{ localStorage.setItem("api_token", t); }catch{} }
+  // aviso discreto no rodapé, no lugar de alert()
+  let avisoTimer;
+  function avisar(texto, erro = false){
+    const el = $("aviso");
+    el.textContent = texto;
+    el.classList.toggle("erro", erro);
+    el.classList.add("visivel");
+    clearTimeout(avisoTimer);
+    avisoTimer = setTimeout(() => el.classList.remove("visivel"), erro ? 5000 : 3000);
+  }
 
-  // fetch para a API com o token; num 401 pede o token e tenta de novo uma vez
+  /* ───── Preferências e token (guardados neste navegador) ───── */
+  function lerLocal(chave){ try{ return localStorage.getItem(chave) || ""; }catch{ return ""; } }
+  function gravarLocal(chave, valor){ try{ valor ? localStorage.setItem(chave, valor) : localStorage.removeItem(chave); }catch{} }
+  const lerToken = () => lerLocal("api_token");
+
+  function atualizarBotaoToken(){ $("btn-token").classList.toggle("hidden", !lerToken()); }
+
+  // abre o diálogo de token; pedidos simultâneos (vários 401 juntos) compartilham o mesmo diálogo
+  let tokenPendente = null;
+  function pedirToken(mensagem){
+    if(tokenPendente) return tokenPendente;
+    const dlg = $("dlg-token"), input = $("dlg-token-input");
+    $("dlg-token-msg").textContent = mensagem;
+    $("dlg-token-remover").classList.toggle("hidden", !lerToken());
+    input.value = ""; dlg.returnValue = "";
+    dlg.showModal(); input.focus();
+    tokenPendente = new Promise(resolver => dlg.addEventListener("close", () => {
+      tokenPendente = null;
+      const novo = input.value.trim();
+      if(dlg.returnValue === "salvar" && novo){ gravarLocal("api_token", novo); resolver(novo); }
+      else { if(dlg.returnValue === "remover") gravarLocal("api_token", ""); resolver(null); }
+      atualizarBotaoToken();
+    }, { once:true }));
+    return tokenPendente;
+  }
+
+  async function trocarToken(){
+    const antes = lerToken();
+    await pedirToken("Troque ou remova o token salvo neste navegador.");
+    if(lerToken() !== antes){ avisar(lerToken() ? "Token atualizado." : "Token removido."); carregarTudo(); }
+  }
+
+  function confirmar(titulo, texto, rotulo, perigo = false){
+    const dlg = $("dlg-confirmar"), ok = $("dlg-confirmar-ok");
+    $("dlg-confirmar-titulo").textContent = titulo;
+    $("dlg-confirmar-texto").textContent = texto;
+    ok.textContent = rotulo;
+    ok.className = perigo ? "btn-perigo" : "btn-primary";
+    dlg.returnValue = "";
+    dlg.showModal(); ok.focus();
+    return new Promise(resolver => dlg.addEventListener("close", () => resolver(dlg.returnValue === "ok"), { once:true }));
+  }
+
+  /* ───── Acesso à API ───── */
+  // fetch com o token; num 401 pede o token e tenta de novo uma vez
   async function api(caminho, opcoes = {}, tentouToken = false){
     const headers = { ...(opcoes.headers || {}) };
     const token = lerToken();
     if(token) headers["X-API-Key"] = token;
     const r = await fetch(API_BASE + caminho, { ...opcoes, headers });
     if(r.status === 401 && !tentouToken){
-      const novo = prompt("Esta API exige um token de acesso. Informe o token:");
-      if(novo){ salvarToken(novo.trim()); return api(caminho, opcoes, true); }
+      const novo = await pedirToken(token
+        ? "O token salvo foi recusado. Informe um token válido."
+        : "Esta API exige um token de acesso. Ele fica salvo só neste navegador.");
+      if(novo) return api(caminho, opcoes, true);
     }
     return r;
   }
 
+  async function lerJson(r){ try{ return await r.json(); }catch{ return {}; } }
+
+  // traduz a resposta de erro da API numa mensagem para o usuário
+  function mensagemErro(r, d){
+    if(!r) return "Sem conexão com a API. Verifique se o servidor está no ar.";
+    if(r.status === 401) return "Token de acesso inválido ou ausente.";
+    if(r.status === 502) return d?.detail || "O serviço externo não respondeu.";
+    if(r.status < 500 && typeof d?.detail === "string") return d.detail;
+    if(r.status === 422) return "Requisição inválida.";
+    if(r.status >= 500) return "Erro interno no servidor. Tente de novo em instantes.";
+    return `Erro inesperado (${r.status}).`;
+  }
+
+  // chamada que já trata erro: devolve { ok, dados } e avisa o usuário se falhar
+  async function chamar(caminho, opcoes){
+    let r = null;
+    try{
+      r = await api(caminho, opcoes);
+      const dados = r.status === 204 ? null : await lerJson(r);
+      if(r.ok) return { ok:true, dados };
+      return { ok:false, mensagem: mensagemErro(r, dados) };
+    }catch(e){
+      console.error(e);
+      return { ok:false, mensagem: mensagemErro(null) };
+    }
+  }
+
+  /* ───── Inicialização ───── */
   window.addEventListener("load", () => {
-    verificarAPI(); carregarHistorico(); carregarDocumentos();
+    atualizarBotaoToken();
+    const provedor = lerLocal("pref_provedor");
+    if(provedor && NOMES_MODELOS[provedor]) $("provedor").value = provedor;
+    $("provedor").addEventListener("change", e => gravarLocal("pref_provedor", e.target.value));
+    $("doc-consulta").addEventListener("change", e => gravarLocal("pref_documento", e.target.value));
+    $("pergunta").addEventListener("keydown", e => {
+      if(e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); consultar(); }
+    });
+    prepararUpload();
+    verificarAPI();
+    carregarTudo();
   });
 
+  function carregarTudo(){ carregarHistorico(); carregarDocumentos(); }
+
   async function verificarAPI(){
-    const el = document.getElementById("api-status");
+    const el = $("api-status");
     try{
       const r = await fetch("/health");
       const d = await r.json();
-      el.innerHTML = d.status==="ok"
-        ? '<span style="color:var(--verde)">✅ Online — Banco conectado</span>'
-        : '<span style="color:var(--laranja)">⚠️ Banco desconectado</span>';
-    }catch{ el.innerHTML = '<span style="color:var(--laranja)">❌ API offline</span>'; }
+      const ok = d.status === "ok";
+      el.className = "status " + (ok ? "ok" : "err");
+      el.textContent = ok ? "Online" : "Banco desconectado";
+    }catch{ el.className = "status err"; el.textContent = "API offline"; }
   }
 
+  /* ───── Documentos ───── */
   async function carregarDocumentos(){
-    try{
-      const r = await api("/documentos");
-      if(!r.ok) return [];
-      const docs = await r.json();
-      const selConsulta = document.getElementById("doc-consulta");
-      selConsulta.innerHTML = '<option value="">Todos os documentos</option>';
-      const rotuloStatus = { processando:" (indexando…)", erro:" (falhou)" };
-      docs.forEach(d=>{
-        const pronto = d.status === "concluido";
-        selConsulta.innerHTML += `<option value="${d.id}"${pronto ? "" : " disabled"}>${esc(d.titulo)}${rotuloStatus[d.status] || ""}</option>`;
-      });
-      return docs;
-    }catch(e){ console.error("Erro ao carregar documentos", e); return []; }
+    clearTimeout(timerDocumentos);
+    const res = await chamar("/documentos");
+    const lista = $("documentos-lista");
+    if(!res.ok){ lista.innerHTML = `<p class="hint">${esc(res.mensagem)}</p>`; return; }
+    const docs = res.dados;
+
+    // select da consulta: mantém a escolha atual (ou a salva, na primeira carga)
+    const sel = $("doc-consulta");
+    const escolhido = primeiraCargaDocs ? lerLocal("pref_documento") : sel.value;
+    primeiraCargaDocs = false;
+    const rotuloStatus = { processando:" (indexando…)", erro:" (falhou)" };
+    sel.innerHTML = '<option value="">Todos os documentos</option>' + docs.map(d =>
+      `<option value="${d.id}"${d.status === "concluido" ? "" : " disabled"}>${esc(d.titulo)}${rotuloStatus[d.status] || ""}</option>`
+    ).join("");
+    sel.value = escolhido;
+    if(sel.value !== escolhido || sel.selectedOptions[0]?.disabled) sel.value = "";
+
+    renderDocumentos(docs);
+    atualizarAcompanhamento(docs);
+
+    // enquanto algo estiver indexando, atualiza sozinho
+    if(docs.some(d => d.status === "processando")) timerDocumentos = setTimeout(carregarDocumentos, 3000);
+  }
+
+  const ICONE_REINDEXAR = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
+  const ICONE_EXCLUIR = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>';
+
+  function renderDocumentos(docs){
+    const lista = $("documentos-lista");
+    if(!docs.length){ lista.innerHTML = '<p class="hint">Nenhum documento indexado.</p>'; return; }
+    lista.innerHTML = docs.map((d, i) => {
+      let meta;
+      if(d.status === "processando") meta = '<div class="doc-meta">Indexando…</div>';
+      else if(d.status === "erro") meta = `<div class="doc-meta err" title="${esc(d.erro)}">Falhou: ${esc(d.erro || "erro desconhecido")}</div>`;
+      else {
+        const data = d.criado_em ? " · " + new Date(d.criado_em).toLocaleDateString("pt-BR") : "";
+        meta = `<div class="doc-meta">${d.total_chunks.toLocaleString("pt-BR")} trechos${data}</div>`;
+      }
+      const titulo = d.status === "concluido"
+        ? `<button class="doc-titulo" data-acao="filtrar" title="Consultar só este documento">${esc(d.titulo)}</button>`
+        : `<span class="doc-titulo" title="${esc(d.titulo)}">${esc(d.titulo)}</span>`;
+      const acoes = d.status === "processando" ? "" : `
+        <div class="doc-acoes">
+          <button class="btn-icone" data-acao="reindexar" title="${d.status === "erro" ? "Tentar de novo" : "Reindexar"}" aria-label="Reindexar ${esc(d.titulo)}">${ICONE_REINDEXAR}</button>
+          <button class="btn-icone" data-acao="excluir" title="Excluir" aria-label="Excluir ${esc(d.titulo)}">${ICONE_EXCLUIR}</button>
+        </div>`;
+      return `<div class="doc-item${d.status === "erro" ? " com-erro" : ""}" data-i="${i}" style="animation-delay:${i*25}ms">
+        <span class="ponto ${d.status === "concluido" ? "" : d.status}"></span>
+        <div class="doc-info">${titulo}${meta}</div>${acoes}
+      </div>`;
+    }).join("");
+    lista.querySelectorAll("[data-acao]").forEach(btn => btn.addEventListener("click", () => {
+      const doc = docs[btn.closest(".doc-item").dataset.i];
+      ({ filtrar: filtrarPorDocumento, reindexar, excluir: excluirDocumento })[btn.dataset.acao](doc);
+    }));
+  }
+
+  function filtrarPorDocumento(doc){
+    $("doc-consulta").value = String(doc.id);
+    gravarLocal("pref_documento", String(doc.id));
+    window.scrollTo({ top:0, behavior:"smooth" });
+    $("pergunta").focus({ preventScroll:true });
+    avisar(`Consultando só em “${doc.titulo}”.`);
+  }
+
+  async function reindexar(doc){
+    if(doc.status === "concluido"){
+      const ok = await confirmar("Reindexar documento?",
+        `Os ${doc.total_chunks} trechos de “${doc.titulo}” serão gerados de novo, o que consome chamadas à API de embeddings. As respostas antigas continuam no histórico, mas perdem o vínculo com estes trechos.`,
+        "Reindexar");
+      if(!ok) return;
+    }
+    const res = await chamar(`/documentos/${doc.id}/reindexar`, { method:"POST" });
+    if(!res.ok){ avisar(res.mensagem, true); return; }
+    avisar(`Reindexando “${doc.titulo}”…`);
+    carregarDocumentos();
+  }
+
+  async function excluirDocumento(doc){
+    const ok = await confirmar("Excluir documento?",
+      `“${doc.titulo}” e seus trechos serão removidos do banco. Não é possível desfazer. As consultas antigas continuam no histórico.`,
+      "Excluir", true);
+    if(!ok) return;
+    const res = await chamar(`/documentos/${doc.id}`, { method:"DELETE" });
+    if(!res.ok){ avisar(res.mensagem, true); return; }
+    avisar("Documento excluído.");
+    carregarDocumentos();
   }
 
   /* ───── Consulta ───── */
   async function consultar(){
-    const pergunta = document.getElementById("pergunta").value.trim();
-    if(!pergunta){ alert("Digite uma pergunta."); return; }
-    const provedor = document.getElementById("provedor").value;
-    const idDoc = document.getElementById("doc-consulta").value || null;
+    const campo = $("pergunta");
+    const pergunta = campo.value.trim();
+    if(!pergunta){ avisar("Digite uma pergunta."); campo.focus(); return; }
+    const btn = $("btn-consultar");
+    if(btn.disabled) return;
+    const provedor = $("provedor").value;
+    const idDoc = $("doc-consulta").value || null;
 
-    const btn = document.getElementById("btn-consultar");
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Consultando...';
-    document.getElementById("resposta-box").classList.add("hidden");
-    try{
-      const r = await api("/consultar",{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ pergunta, provedor, id_documento: idDoc? Number(idDoc):null })
-      });
-      const d = await r.json();
-      if(!r.ok) throw new Error(d.detail || r.status);
-      document.getElementById("resposta-texto").textContent = d.resposta;
-      renderFontes("fontes-conteudo", d.fontes);
-      document.getElementById("resposta-box").classList.remove("hidden");
-      carregarHistorico();
-    }catch(e){ alert("Erro ao consultar a API."); console.error(e); }
-    finally{ btn.disabled=false; btn.textContent="Consultar"; }
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Consultando…';
+    marcarHistoricoAtivo(null);
+    mostrarCarregando();
+    const res = await chamar("/consultar", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ pergunta, provedor, id_documento: idDoc ? Number(idDoc) : null })
+    });
+    btn.disabled = false; btn.textContent = "Consultar";
+    if(!res.ok){ $("resposta-box").classList.add("hidden"); avisar(res.mensagem, true); return; }
+    exibirResposta({ ...res.dados, data_hora: null });
+    carregarHistorico(res.dados.consulta_id);
   }
 
-  function renderFontes(elId, fontes){
-    const fc = document.getElementById(elId); fc.innerHTML="";
-    if(fontes && fontes.length){
-      fontes.forEach((f,i)=>{
-        fc.innerHTML += `<div class="fonte-item"><strong>[${i+1}] ${esc(f.titulo)}</strong>
-          ${esc(f.fonte)} &nbsp;<span class="score">score: ${Number(f.score).toFixed(3)}</span>
-          <div style="margin-top:.3rem;color:#475569">${esc((f.texto_chunk||"").substring(0,120))}…</div></div>`;
-      });
-    } else { fc.innerHTML = '<p class="hint">Nenhuma fonte utilizada.</p>'; }
+  function mostrarCarregando(){
+    mostrar($("resposta-box"));
+    $("resposta-pronta").classList.add("hidden");
+    $("resposta-carregando").classList.remove("hidden");
+  }
+
+  function exibirResposta(d){
+    respostaAtual = { resposta: d.resposta || "", fontes: d.fontes || [] };
+    const modelo = NOMES_MODELOS[d.modelo_llm] || d.modelo_llm || "";
+    const quando = d.data_hora ? new Date(d.data_hora).toLocaleString("pt-BR") : "agora";
+    $("resposta-meta").textContent = [modelo, quando].filter(Boolean).join(" · ");
+    $("resposta-texto").innerHTML = markdown(respostaAtual.resposta || "Sem resposta registrada.", respostaAtual.fontes.length);
+    renderFontes(respostaAtual.fontes);
+    $("resposta-carregando").classList.add("hidden");
+    $("resposta-pronta").classList.remove("hidden");
+    const box = $("resposta-box");
+    mostrar(box);
+    // traz a resposta para a tela se ela surgiu abaixo da dobra
+    if(box.getBoundingClientRect().top > innerHeight * .6) box.scrollIntoView({ behavior:"smooth", block:"start" });
+  }
+
+  // reexibe o bloco reiniciando a animação de entrada
+  function mostrar(el){
+    el.classList.remove("hidden", "visivel");
+    void el.offsetWidth;
+    el.classList.add("visivel");
+  }
+
+  // markdown básico (títulos, listas, negrito, itálico, código) sobre o texto JÁ escapado,
+  // e citações [1], [Documento 2]… viram botões que levam à fonte
+  function markdown(texto, nFontes){
+    const inline = s => s
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/__(.+?)__/g, "<strong>$1</strong>")
+      .replace(/(^|[^*\w])\*(?!\s)([^*]+?)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/\[(?:Documento|Doc\.?|Fonte)?\s*(\d{1,2})\]/gi, (t, n) =>
+        Number(n) >= 1 && Number(n) <= nFontes
+          ? `<button class="cita" data-n="${Number(n)}" title="Ver fonte ${Number(n)}">${Number(n)}</button>` : t);
+
+    let html = "", lista = null, paragrafo = [];
+    const fecharParagrafo = () => { if(paragrafo.length){ html += `<p>${inline(paragrafo.join("<br>"))}</p>`; paragrafo = []; } };
+    const fecharLista = () => { if(lista){ html += `</${lista}>`; lista = null; } };
+    const abrirLista = (tipo, inicio) => {
+      if(lista === tipo) return;
+      fecharLista();
+      html += tipo === "ol" && inicio !== 1 ? `<ol start="${inicio}">` : `<${tipo}>`;
+      lista = tipo;
+    };
+
+    for(const bruta of esc(texto).replace(/\r\n?/g, "\n").split("\n")){
+      const l = bruta.trim();
+      let m;
+      if(!l){ fecharParagrafo(); fecharLista(); }
+      else if((m = l.match(/^#{1,6}\s+(.+)$/))){ fecharParagrafo(); fecharLista(); html += `<h4>${inline(m[1].replace(/#+$/, ""))}</h4>`; }
+      else if(/^(-{3,}|\*{3,}|_{3,})$/.test(l)){ fecharParagrafo(); fecharLista(); html += "<hr>"; }
+      else if((m = l.match(/^[-*•]\s+(.+)$/))){ fecharParagrafo(); abrirLista("ul"); html += `<li>${inline(m[1])}</li>`; }
+      else if((m = l.match(/^(\d{1,3})[.)]\s+(.+)$/))){ fecharParagrafo(); abrirLista("ol", Number(m[1])); html += `<li>${inline(m[2])}</li>`; }
+      else { fecharLista(); paragrafo.push(l); }
+    }
+    fecharParagrafo(); fecharLista();
+    return html;
+  }
+
+  document.addEventListener("click", e => {
+    const cita = e.target.closest(".cita");
+    if(cita) irParaFonte(Number(cita.dataset.n));
+  });
+
+  function irParaFonte(n){
+    const el = document.querySelector(`.fonte-item[data-n="${n}"]`);
+    if(!el) return;
+    alternarFonte(el, true);
+    el.scrollIntoView({ behavior:"smooth", block:"center" });
+    el.classList.add("destaque");
+    setTimeout(() => el.classList.remove("destaque"), 1600);
+  }
+
+  function renderFontes(fontes){
+    const fc = $("fontes-conteudo");
+    if(!fontes.length){ fc.innerHTML = '<p class="hint">Nenhuma fonte utilizada.</p>'; return; }
+    fc.innerHTML = fontes.map((f, i) => {
+      const score = Number(f.score) || 0;
+      const largura = Math.max(0, Math.min(1, score)) * 100;
+      const texto = f.texto_chunk || "";
+      return `<div class="fonte-item" data-n="${i+1}" style="animation-delay:${i*50}ms">
+        <div class="fonte-topo">
+          <span class="fonte-num">${String(i+1).padStart(2,"0")}</span>
+          <strong>${esc(f.titulo)}</strong>
+        </div>
+        <div class="fonte-meta">
+          <span>${esc(f.fonte)}</span>
+          <span class="barra" title="relevância"><i style="width:${largura}%;animation-delay:${150+i*50}ms"></i></span>
+          <span class="score">${score.toFixed(3)}</span>
+        </div>
+        ${texto ? `<div class="fonte-trecho">${esc(texto)}</div>
+        <button class="btn-texto fonte-mais" aria-expanded="false">Ver trecho completo</button>` : ""}
+      </div>`;
+    }).join("");
+    fc.querySelectorAll(".fonte-item").forEach(el => {
+      const trecho = el.querySelector(".fonte-trecho"), botao = el.querySelector(".fonte-mais");
+      if(!trecho) return;
+      // trecho curto já cabe inteiro: esconde o botão
+      requestAnimationFrame(() => { if(trecho.scrollHeight <= trecho.clientHeight + 2) botao.classList.add("hidden"); });
+      botao.addEventListener("click", () => alternarFonte(el));
+      trecho.addEventListener("click", () => { if(!getSelection().toString()) alternarFonte(el); });
+    });
+  }
+
+  function alternarFonte(el, abrir){
+    const aberta = abrir ?? !el.classList.contains("aberta");
+    el.classList.toggle("aberta", aberta);
+    const botao = el.querySelector(".fonte-mais");
+    if(botao){ botao.textContent = aberta ? "Recolher" : "Ver trecho completo"; botao.setAttribute("aria-expanded", aberta); }
+  }
+
+  async function copiarResposta(){
+    if(!respostaAtual) return;
+    const fontes = respostaAtual.fontes.map((f, i) => `[${i+1}] ${f.titulo} — ${f.fonte}`).join("\n");
+    const texto = respostaAtual.resposta + (fontes ? `\n\nFontes:\n${fontes}` : "");
+    try{
+      await navigator.clipboard.writeText(texto);
+    }catch{
+      // navegadores sem a API de área de transferência (ou fora de HTTPS)
+      const t = document.createElement("textarea");
+      t.value = texto; t.style.position = "fixed"; t.style.opacity = "0";
+      document.body.appendChild(t); t.select();
+      const ok = document.execCommand("copy"); t.remove();
+      if(!ok){ avisar("Não foi possível copiar.", true); return; }
+    }
+    const btn = $("btn-copiar");
+    btn.textContent = "Copiado";
+    setTimeout(() => btn.textContent = "Copiar", 1500);
   }
 
   function limpar(){
-    document.getElementById("pergunta").value="";
-    document.getElementById("resposta-box").classList.add("hidden");
+    const campo = $("pergunta");
+    campo.value = ""; campo.focus();
+    $("resposta-box").classList.add("hidden");
+    respostaAtual = null;
+    marcarHistoricoAtivo(null);
   }
 
   /* ───── Upload ───── */
+  function prepararUpload(){
+    const area = $("upload-area"), input = $("arquivo-input");
+    ["dragenter","dragover"].forEach(ev => area.addEventListener(ev, e => {
+      e.preventDefault(); area.classList.add("arrastando");
+    }));
+    ["dragleave","drop"].forEach(ev => area.addEventListener(ev, e => {
+      e.preventDefault(); area.classList.remove("arrastando");
+    }));
+    area.addEventListener("drop", e => {
+      if(e.dataTransfer.files.length){ input.files = e.dataTransfer.files; atualizarNomeArquivo(); }
+    });
+  }
+
   function atualizarNomeArquivo(){
-    const input = document.getElementById("arquivo-input");
-    if(input.files.length>0){
+    const input = $("arquivo-input");
+    if(input.files.length > 0){
       const nome = input.files[0].name.replace(/\.[^.]+$/,"").replace(/[-_]/g," ");
-      document.getElementById("upload-label").textContent = input.files[0].name;
-      document.getElementById("titulo-doc").value = nome;
+      $("upload-label").textContent = input.files[0].name;
+      $("titulo-doc").value = nome;
     }
   }
+
   async function fazerUpload(){
-    const input = document.getElementById("arquivo-input");
-    const titulo = document.getElementById("titulo-doc").value.trim();
-    const status = document.getElementById("upload-status");
-    if(!input.files.length){ status.innerHTML='<span class="err">Selecione um arquivo.</span>'; return; }
-    if(!titulo){ status.innerHTML='<span class="err">Informe o título.</span>'; return; }
-    status.textContent="Enviando…";
+    const input = $("arquivo-input");
+    const titulo = $("titulo-doc").value.trim();
+    const status = $("upload-status");
+    if(!input.files.length){ status.innerHTML = '<span class="err">Selecione um arquivo.</span>'; return; }
+    if(!titulo){ status.innerHTML = '<span class="err">Informe o título.</span>'; return; }
+    status.innerHTML = '<span class="hint">Enviando…</span>';
     const fd = new FormData();
     fd.append("arquivo", input.files[0]);
     fd.append("titulo", titulo);
-    try{
-      const r = await api("/ingerir",{ method:"POST", body: fd });
-      const d = await r.json();
-      if(r.ok){
-        input.value=""; document.getElementById("titulo-doc").value="";
-        document.getElementById("upload-label").innerHTML="Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em>";
-        acompanharIndexacao(d.documento_id, d.mensagem);
-      } else { status.innerHTML = `<span class="err">❌ ${esc(d.detail)}</span>`; }
-    }catch(e){ status.innerHTML='<span class="err">❌ Erro de conexão com a API.</span>'; }
+    const res = await chamar("/ingerir", { method:"POST", body: fd });
+    if(!res.ok){ status.innerHTML = `<span class="err">${esc(res.mensagem)}</span>`; return; }
+    input.value = ""; $("titulo-doc").value = "";
+    $("upload-label").innerHTML = ROTULO_UPLOAD;
+    status.innerHTML = `<span class="hint">${esc(res.dados.mensagem)}</span>`;
+    acompanhando = res.dados.documento_id;
+    carregarDocumentos();
   }
 
-  // a indexação roda em segundo plano no servidor: consulta o status até terminar
-  async function acompanharIndexacao(id, mensagem){
-    const status = document.getElementById("upload-status");
-    status.innerHTML = `<span class="hint">⏳ ${esc(mensagem)}</span>`;
-    for(;;){
-      const doc = (await carregarDocumentos()).find(d => d.id === id);
-      if(!doc){ status.textContent = ""; return; }
-      if(doc.status === "concluido"){
-        status.innerHTML = `<span class="ok">✅ "${esc(doc.titulo)}" indexado (ID: ${doc.id})</span>`; return;
-      }
-      if(doc.status === "erro"){
-        status.innerHTML = `<span class="err">❌ Falha ao indexar: ${esc(doc.erro)}</span>`; return;
-      }
-      await new Promise(ok => setTimeout(ok, 3000));
+  // a indexação roda em segundo plano no servidor: o painel de upload mostra quando terminar
+  function atualizarAcompanhamento(docs){
+    if(acompanhando === null) return;
+    const status = $("upload-status");
+    const doc = docs.find(d => d.id === acompanhando);
+    if(!doc){ acompanhando = null; status.textContent = ""; return; }
+    if(doc.status === "concluido"){
+      carregarSugestoes();
+      status.innerHTML = `<span class="ok">“${esc(doc.titulo)}” indexado · ${doc.total_chunks} trechos</span>`;
+      acompanhando = null;
+    } else if(doc.status === "erro"){
+      status.innerHTML = `<span class="err">Falha ao indexar: ${esc(doc.erro)}</span>`;
+      acompanhando = null;
     }
   }
 
   /* ───── Histórico ───── */
-  async function carregarHistorico(){
-    const lista = document.getElementById("historico-lista");
-    try{
-      const r = await api("/historico?limite=15");
-      if(!r.ok) throw new Error(r.status);
-      const d = await r.json();
-      if(!d.length){ lista.innerHTML='<p class="hint">Nenhuma consulta ainda.</p>'; return; }
-      lista.innerHTML = d.map((c, i)=>`
-        <div class="hist-item" data-i="${i}">
-          <div>${esc(c.pergunta.substring(0,70))}${c.pergunta.length>70?"…":""}</div>
-          <div class="hist-data">${new Date(c.data_hora).toLocaleString("pt-BR")}</div>
-        </div>`).join("");
-      // o texto vai pelo índice, não interpolado num onclick
-      lista.querySelectorAll(".hist-item").forEach(el =>
-        el.addEventListener("click", () => preencherPergunta(d[el.dataset.i].pergunta)));
-    }catch{ lista.innerHTML='<p class="hint">Histórico indisponível.</p>'; }
+  async function carregarHistorico(idAtivo){
+    const lista = $("historico-lista");
+    const res = await chamar("/historico?limite=15");
+    if(!res.ok){ lista.innerHTML = `<p class="hint">${esc(res.mensagem)}</p>`; return; }
+    const d = res.dados;
+    historicoVazio = !d.length;
+    carregarSugestoes();
+    if(!d.length){ lista.innerHTML = '<p class="hint">Nenhuma consulta ainda.</p>'; return; }
+    lista.innerHTML = d.map((c, i) => `
+      <button class="hist-item" data-id="${c.id}" style="animation-delay:${i*25}ms">
+        <span>${esc(c.pergunta.substring(0,90))}${c.pergunta.length > 90 ? "…" : ""}</span>
+        <span class="hist-data">${new Date(c.data_hora).toLocaleString("pt-BR")}</span>
+      </button>`).join("");
+    lista.querySelectorAll(".hist-item").forEach(el =>
+      el.addEventListener("click", () => abrirConsulta(Number(el.dataset.id))));
+    if(idAtivo) marcarHistoricoAtivo(idAtivo);
   }
-  function preencherPergunta(texto){
-    document.getElementById("pergunta").value = texto;
-    window.scrollTo({ top:0, behavior:"smooth" });
+
+  function marcarHistoricoAtivo(id){
+    document.querySelectorAll(".hist-item").forEach(el => el.classList.toggle("ativo", Number(el.dataset.id) === id));
+  }
+
+  // mostra a resposta já salva, sem chamar o LLM de novo
+  async function abrirConsulta(id){
+    marcarHistoricoAtivo(id);
+    mostrarCarregando();
+    $("resposta-box").scrollIntoView({ behavior:"smooth", block:"start" });
+    const res = await chamar(`/historico/${id}`);
+    if(!res.ok){ $("resposta-box").classList.add("hidden"); avisar(res.mensagem, true); return; }
+    $("pergunta").value = res.dados.pergunta;
+    exibirResposta(res.dados);
+  }
+
+  // perguntas sobre artigos sorteados dos documentos indexados; ao clicar,
+  // a consulta já fica restrita ao documento de onde a pergunta saiu
+  async function carregarSugestoes(){
+    const box = $("sugestoes");
+    if(!historicoVazio){ box.classList.add("hidden"); return; }
+    const res = await chamar("/sugestoes?limite=3");
+    const sugestoes = res.ok ? res.dados : [];
+    box.classList.toggle("hidden", !sugestoes.length);
+    box.innerHTML = sugestoes.map((s, i) =>
+      `<button class="sugestao" data-i="${i}" style="animation-delay:${i*60}ms">${esc(s.pergunta)}</button>`).join("");
+    box.querySelectorAll(".sugestao").forEach(b => b.addEventListener("click", () => {
+      const s = sugestoes[b.dataset.i];
+      $("pergunta").value = s.pergunta;
+      const sel = $("doc-consulta");
+      sel.value = String(s.id_documento);
+      if(sel.value !== String(s.id_documento)) sel.value = "";
+      $("pergunta").focus();
+    }));
   }
 </script>
 </body>

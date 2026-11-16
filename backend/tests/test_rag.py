@@ -625,3 +625,192 @@ class TestIngestaoEmSegundoPlano:
         assert doc.status == "erro"
         assert "chave inválida" in doc.erro
         db.close.assert_called_once()
+
+
+# ─────────────────────────────────────────────
+# Testes de erros de provedor, histórico e gestão de documentos
+# ─────────────────────────────────────────────
+
+class TestErrosDeProvedor:
+    def test_falha_do_llm_vira_erro_provedor(self):
+        from app.services import rag_service
+        fontes = [{"chunk_id": 1, "titulo": "Lei", "fonte": "x", "texto_chunk": "Art. 1º", "score": .9}]
+        llm = MagicMock(side_effect=RuntimeError("401 da API"))
+        with patch.object(rag_service, "_recuperar_chunks", return_value=fontes), \
+             patch.object(rag_service, "_get_llm", return_value=llm):
+            with pytest.raises(rag_service.ErroProvedor, match="Maritaca"):
+                rag_service.responder_pergunta(MagicMock(), "pergunta")
+
+    def test_falha_nos_embeddings_vira_erro_provedor(self):
+        from openai import APIConnectionError
+        from app.services import rag_service
+        erro = APIConnectionError(request=MagicMock())
+        with patch.object(rag_service, "_recuperar_chunks", side_effect=erro):
+            with pytest.raises(rag_service.ErroProvedor, match="embeddings"):
+                rag_service.responder_pergunta(MagicMock(), "pergunta")
+
+    def test_falha_nao_grava_no_historico(self):
+        from app.services import rag_service
+        db = MagicMock()
+        with patch.object(rag_service, "_recuperar_chunks", return_value=[{"texto_chunk": "x"}]), \
+             patch.object(rag_service, "_get_llm", return_value=MagicMock(side_effect=RuntimeError())):
+            with pytest.raises(rag_service.ErroProvedor):
+                rag_service.responder_pergunta(db, "pergunta")
+        db.add.assert_not_called()
+        db.commit.assert_not_called()
+
+
+class TestObterConsulta:
+    def test_mantem_a_ordem_e_marca_trechos_indisponiveis(self):
+        from datetime import datetime
+        from app.services import rag_service
+        chunk = MagicMock(id=5, texto_chunk="Parecer sem artigo.")
+        chunk.documento.titulo = "Parecer"
+        chunk.documento.fonte.nome = "AGU"
+        usados = [MagicMock(id=2, chunk=None, score=.5), MagicMock(id=1, chunk=chunk, score=.9)]
+        consulta = MagicMock(id=3, pergunta="P?", data_hora=datetime(2026, 1, 1))
+        consulta.resposta.texto_resposta = "R [1]"
+        consulta.resposta.modelo_llm = "openai"
+        consulta.resposta.documentos_utilizados = usados
+        db = MagicMock()
+        db.get.return_value = consulta
+
+        r = rag_service.obter_consulta(db, 3)
+
+        assert r["resposta"] == "R [1]" and r["modelo_llm"] == "openai"
+        assert [f["titulo"] for f in r["fontes"]] == ["Parecer", "Trecho indisponível"]
+        assert r["fontes"][0]["texto_chunk"] == "Parecer sem artigo."
+
+    def test_consulta_inexistente(self):
+        from app.services import rag_service
+        db = MagicMock()
+        db.get.return_value = None
+        assert rag_service.obter_consulta(db, 99) is None
+
+
+class TestRotasDeDocumentos:
+    @pytest.fixture
+    def db(self):
+        from app.core.database import get_db
+        from app.main import app
+        db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: db
+        yield db
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def client(self, db):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        return TestClient(app)
+
+    def test_consulta_com_llm_fora_do_ar_retorna_502(self, client):
+        from app.services.rag_service import ErroProvedor
+        with patch("app.api.routes.rag_service.responder_pergunta",
+                   side_effect=ErroProvedor("O modelo Maritaca não respondeu.")):
+            r = client.post("/api/v1/consultar", json={"pergunta": "x"})
+        assert r.status_code == 502
+        assert "Maritaca" in r.json()["detail"]
+
+    def test_detalhe_do_historico(self, client):
+        with patch("app.api.routes.rag_service.obter_consulta", return_value={"consulta_id": 1}):
+            assert client.get("/api/v1/historico/1").json() == {"consulta_id": 1}
+        with patch("app.api.routes.rag_service.obter_consulta", return_value=None):
+            assert client.get("/api/v1/historico/2").status_code == 404
+
+    def test_lista_documentos_com_total_de_chunks(self, client, db):
+        doc = MagicMock(id=1, titulo="Lei", status="concluido", erro=None, criado_em=None)
+        db.query.return_value.order_by.return_value.all.return_value = [doc]
+        db.query.return_value.group_by.return_value.all.return_value = [(1, 42)]
+        r = client.get("/api/v1/documentos")
+        assert r.json()[0]["total_chunks"] == 42
+
+    def test_excluir_documento(self, client, db):
+        doc = MagicMock(id=1, status="concluido")
+        db.get.return_value = doc
+        with patch("app.api.routes.ingestao_service.excluir_documento") as excluir:
+            r = client.delete("/api/v1/documentos/1")
+        assert r.status_code == 204
+        excluir.assert_called_once_with(db, doc)
+
+    def test_nao_mexe_em_documento_processando(self, client, db):
+        db.get.return_value = MagicMock(id=1, status="processando")
+        with patch("app.api.routes.ingestao_service.excluir_documento") as excluir:
+            assert client.delete("/api/v1/documentos/1").status_code == 409
+            assert client.post("/api/v1/documentos/1/reindexar").status_code == 409
+        excluir.assert_not_called()
+
+    def test_documento_inexistente(self, client, db):
+        db.get.return_value = None
+        assert client.delete("/api/v1/documentos/9").status_code == 404
+
+    def test_reindexar_agenda_o_processamento(self, client, db):
+        doc = MagicMock(id=4, titulo="Lei", status="erro")
+        db.get.return_value = doc
+        with patch("app.api.routes.ingestao_service.preparar_reindexacao") as preparar, \
+             patch("app.api.routes.ingestao_service.processar_documento") as processar:
+            r = client.post("/api/v1/documentos/4/reindexar")
+        assert r.status_code == 202
+        preparar.assert_called_once_with(db, doc)
+        processar.assert_called_once_with(4)
+
+
+class TestExclusaoEReindexacao:
+    def test_excluir_apaga_e_confirma(self):
+        from app.services.ingestao_service import excluir_documento
+        db = MagicMock()
+        excluir_documento(db, MagicMock(id=1))
+        # solta respostas, apaga chunks, solta consultas, apaga o documento
+        assert db.execute.call_count == 4
+        db.commit.assert_called_once()
+
+    def test_reindexar_volta_a_processando(self):
+        from app.services.ingestao_service import preparar_reindexacao
+        db = MagicMock()
+        doc = MagicMock(id=1, status="erro", erro="sem chave")
+        preparar_reindexacao(db, doc)
+        assert (doc.status, doc.erro) == ("processando", None)
+        db.commit.assert_called_once()
+
+
+class TestSugestoes:
+    def test_pergunta_sobre_artigo(self):
+        from app.services.rag_service import _pergunta_sobre
+        assert _pergunta_sobre("Lei 8.742/93", "Art. 20. O benefício...") == \
+            "O que diz o Art. 20 da Lei 8.742/93?"
+        assert _pergunta_sobre("Decreto 3.048/99", "Art. 1o Texto") == \
+            "O que diz o Art. 1º do Decreto 3.048/99?"
+        assert _pergunta_sobre("Parecer AGU", "Texto sem artigo") is None
+
+    def _gerar(self, linhas, limite=3):
+        from app.services.rag_service import gerar_sugestoes
+        db = MagicMock()
+        db.execute.return_value.all.return_value = linhas
+        return gerar_sugestoes(db, limite)
+
+    def test_intercala_documentos(self):
+        linhas = [
+            ("Art. 1º a", 1, "Lei A"), ("Art. 2º b", 1, "Lei A"),
+            ("Art. 3º c", 1, "Lei A"), ("Art. 9º d", 2, "Lei B"),
+        ]
+        r = self._gerar(linhas)
+        assert [s["id_documento"] for s in r] == [1, 2, 1]
+        assert r[1]["pergunta"] == "O que diz o Art. 9º da Lei B?"
+
+    def test_lei_nao_gera_pergunta_generica(self):
+        r = self._gerar([("Brasília, 8 de maio", 1, "Lei A"), ("Art. 1º a", 1, "Lei A")])
+        assert [s["pergunta"] for s in r] == ["O que diz o Art. 1º da Lei A?"]
+
+    def test_documento_sem_artigos_gera_uma_pergunta_geral(self):
+        r = self._gerar([("parágrafo um", 5, "Parecer X"), ("parágrafo dois", 5, "Parecer X")])
+        assert r == [{"pergunta": "Quais são os principais pontos do Parecer X?", "id_documento": 5}]
+
+    def test_sem_documentos(self):
+        assert self._gerar([]) == []
+
+    def test_rota_limita_a_quantidade(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with patch("app.api.routes.rag_service.gerar_sugestoes", return_value=[]) as gerar:
+            assert TestClient(app).get("/api/v1/sugestoes?limite=50").json() == []
+        assert gerar.call_args.kwargs["limite"] == 10

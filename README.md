@@ -136,7 +136,7 @@ Em outra plataforma, a configuração é esta:
 
 Com `API_TOKEN` definido, as rotas `/api/v1` exigem o cabeçalho `X-API-Key`. A página pede o token na primeira chamada recusada e o guarda no navegador. A página e o `/health` continuam públicos.
 
-**Uma instância só.** A indexação roda em segundo plano no próprio processo da API: o upload responde na hora, e o status do documento (`processando`, `concluido` ou `erro`) aparece em `GET /documentos`. Se o servidor reiniciar no meio, o documento fica com erro e basta enviar o arquivo de novo. Com mais de uma instância, isso precisaria de uma fila.
+**Uma instância só.** A indexação roda em segundo plano no próprio processo da API: o upload responde na hora, e o status do documento (`processando`, `concluido` ou `erro`) aparece em `GET /documentos`. Se o servidor reiniciar no meio, o documento fica com erro e basta reindexá-lo pela página (ou enviar o arquivo de novo). Com mais de uma instância, isso precisaria de uma fila.
 
 ---
 
@@ -165,10 +165,13 @@ Prefixo: `/api/v1`
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `POST` | `/consultar` | Consulta com um modelo (padrão: Maritaca). |
+| `POST` | `/consultar` | Consulta com um modelo (padrão: Maritaca). Responde `502` se o LLM ou a API de embeddings falhar. |
 | `POST` | `/ingerir` | Recebe um documento e o indexa em segundo plano (responde `202`). |
-| `GET`  | `/documentos` | Lista os documentos e o status da indexação de cada um. |
+| `GET`  | `/documentos` | Lista os documentos, o status da indexação e o total de trechos de cada um. |
+| `POST` | `/documentos/{id}/reindexar` | Refaz chunks e embeddings a partir do texto salvo (responde `202`). |
+| `DELETE` | `/documentos/{id}` | Exclui o documento e seus chunks; o histórico de consultas é mantido. |
 | `GET`  | `/historico` | Histórico de consultas. |
+| `GET`  | `/historico/{id}` | Resposta salva e fontes de uma consulta, sem chamar o LLM de novo. |
 
 ---
 

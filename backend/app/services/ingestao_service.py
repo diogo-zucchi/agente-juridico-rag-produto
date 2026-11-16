@@ -15,13 +15,14 @@ from typing import List, Tuple
 import numpy as np
 from loguru import logger
 from openai import OpenAI
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.models import (
-    STATUS_CONCLUIDO, STATUS_ERRO, STATUS_PROCESSANDO, Chunk, Documento,
+    STATUS_CONCLUIDO, STATUS_ERRO, STATUS_PROCESSANDO, Chunk, Consulta, Documento,
+    RespostaDocumento,
 )
 from app.services.texto_legal import (
     dividir_artigo, eh_texto_legal, extrair_artigos, juntar_artigo, rotulo_do_artigo,
@@ -251,6 +252,37 @@ def processar_documento(id_documento: int) -> None:
             db.commit()
     finally:
         db.close()
+
+
+def _apagar_chunks(db: Session, id_documento: int) -> None:
+    """Apaga os chunks do documento, soltando antes as respostas antigas que
+    os citavam (elas continuam no histórico, só sem o vínculo)."""
+    ids_chunks = select(Chunk.id).where(Chunk.id_documento == id_documento).scalar_subquery()
+    db.execute(
+        update(RespostaDocumento)
+        .where(RespostaDocumento.id_chunk.in_(ids_chunks))
+        .values(id_chunk=None)
+    )
+    db.execute(delete(Chunk).where(Chunk.id_documento == id_documento))
+
+
+def excluir_documento(db: Session, doc: Documento) -> None:
+    """Remove o documento e seus chunks; consultas feitas sobre ele ficam no histórico."""
+    _apagar_chunks(db, doc.id)
+    db.execute(
+        update(Consulta).where(Consulta.id_documento == doc.id).values(id_documento=None)
+    )
+    db.execute(delete(Documento).where(Documento.id == doc.id))
+    db.commit()
+    logger.info(f"Documento {doc.id} excluído.")
+
+
+def preparar_reindexacao(db: Session, doc: Documento) -> None:
+    """Descarta os chunks e volta o documento a 'processando'; a indexação
+    em si é feita depois por processar_documento, a partir do texto salvo."""
+    _apagar_chunks(db, doc.id)
+    doc.status, doc.erro = STATUS_PROCESSANDO, None
+    db.commit()
 
 
 def ingerir_documento(
