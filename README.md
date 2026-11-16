@@ -135,7 +135,18 @@ Documentação interativa da API (Swagger): `http://localhost:8001/docs`.
 Em produção são duas peças, sem Docker:
 
 1. **Banco:** um Postgres gerenciado com pgvector, como [Neon](https://neon.tech) ou [Supabase](https://supabase.com). Copie a URL de conexão (`postgresql://...`); a API acrescenta o driver sozinha. As tabelas são criadas na primeira inicialização.
-2. **API:** uma plataforma que rode Python a partir do repositório, como [Render](https://render.com) ou [Railway](https://railway.app):
+2. **API:** uma plataforma que rode Python a partir do repositório, como [Render](https://render.com) ou [Railway](https://railway.app).
+
+**Caminho pronto: Neon + Render.**
+
+1. No Neon, crie um projeto na região **AWS US East (N. Virginia)** e copie a connection string (`postgresql://...?sslmode=require`).
+2. No Render, **New → Blueprint** e escolha este repositório: o `render.yaml` cria o serviço na região Virginia, a mesma do banco.
+3. O Render pede `DATABASE_URL`, `MARITACA_API_KEY` e `OPENAI_API_KEY`; o `API_TOKEN` é gerado por ele (copie-o em **Environment** para usar a página).
+4. Quando o deploy terminar, `https://<serviço>.onrender.com/health` deve responder `"database": true`.
+
+O plano `free` do Render dorme após 15 minutos sem acesso e leva cerca de um minuto para acordar; para demonstrações, o plano pago mais simples evita isso.
+
+Em outra plataforma, a configuração é esta:
    - **Build:** `pip install -r requirements.txt`
    - **Start:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - **Python:** 3.13 (arquivo `.python-version`; no Render, também pela variável `PYTHON_VERSION`)

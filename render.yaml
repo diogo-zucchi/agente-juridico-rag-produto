@@ -1,0 +1,28 @@
+# Blueprint do Render: cria o serviço da API a partir deste repositório.
+# No painel: New > Blueprint > escolher o repositório. O banco fica fora do
+# Render (Neon/Supabase): ver "Hospedagem" no README.
+services:
+  - type: web
+    name: agente-juridico-rag
+    runtime: python
+    # mesma região do banco (Neon em AWS us-east-1): cada consulta faz várias
+    # idas ao banco, e a distância entre os dois soma em todas
+    region: virginia
+    plan: free
+    # Python 3.13 vem do .python-version
+    buildCommand: pip install -r requirements.txt
+    # 1 instância e 1 worker: a indexação roda em segundo plano no processo
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # sync: false — o Render pede o valor na criação, fora do repositório
+      - key: DATABASE_URL
+        sync: false
+      - key: MARITACA_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # valor aleatório gerado pelo Render; copie-o no painel para usar a página
+      - key: API_TOKEN
+        generateValue: true
