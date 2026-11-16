@@ -25,6 +25,7 @@ logs/
 .vscode/
 .idea/
 *.swp
+.claude/
 
 # OS
 .DS_Store

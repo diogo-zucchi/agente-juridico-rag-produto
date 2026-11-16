@@ -1,46 +1,64 @@
-# Agente Jurídico Inteligente — RAG
+# Agente Jurídico
 
-TCC — Engenharia de Software — UTFPR Dois Vizinhos — 2026
-Autor: Diogo Eduardo Ferrari Zucchi
-Orientador: Prof. Dr. Francisco Carlos Souza
+Consulta jurídica em linguagem natural, com respostas fundamentadas nos documentos que você indexa.
 
-Sistema de consulta jurídica em linguagem natural. O usuário indexa documentos jurídicos e faz perguntas; o sistema recupera os trechos mais relevantes por busca semântica e gera uma resposta fundamentada citando as fontes, permitindo verificar a procedência de cada informação.
+Você envia leis, pareceres ou decisões e faz perguntas como faria a um colega. O Agente Jurídico encontra os trechos relevantes, escreve uma resposta baseada apenas neles e cita cada fonte, para que qualquer informação possa ser conferida no texto original.
+
+---
+
+## Funcionalidades
+
+- **Perguntas em linguagem natural:** a busca é semântica, então a pergunta não precisa repetir as palavras exatas da lei.
+- **Respostas com fontes:** cada resposta indica os trechos usados (`[1]`, `[2]`…), com o documento de origem e o grau de relevância.
+- **Artigos citados pelo número:** perguntas como "o que diz o Art. 20 da Lei 8.742?" trazem o texto exato do artigo.
+- **Leis tratadas como leis:** em textos compilados do Planalto, só a redação vigente é indexada; dispositivos revogados viram uma nota curta.
+- **Filtro por documento:** a busca pode ser restrita a um único documento quando a pergunta exige precisão.
+- **Sugestões de perguntas:** geradas a partir dos documentos indexados, para quem está começando.
+- **Histórico:** consultas anteriores ficam salvas e podem ser reabertas sem gerar a resposta de novo.
+- **Gestão de documentos:** envio de PDF, TXT ou HTML, com indexação em segundo plano, reindexação e exclusão.
+- **Modelo reserva:** se o modelo principal falhar, a pergunta é respondida automaticamente por outro.
+
+---
+
+## Como funciona
+
+1. **Indexação:** o documento enviado é dividido em trechos, e cada trecho vira um vetor (embedding) guardado no banco junto do texto.
+2. **Busca:** a pergunta também vira um vetor, e o banco devolve os trechos mais próximos. Artigos citados pelo número entram primeiro, com o texto exato.
+3. **Resposta:** os trechos encontrados vão para o modelo de linguagem com a instrução de responder apenas com base neles e citar as fontes.
 
 ---
 
 ## Modelos de linguagem
 
-A geração das respostas usa o padrão de API compatível com a OpenAI, de modo que a troca de modelo se resume a alterar a URL base, a credencial e o nome do modelo. Dois modelos estão integrados:
-
 | Provedor | Modelo | Papel |
 |----------|--------|-------|
-| Maritaca | `sabia-4` | **Modelo principal** — brasileiro, com pré-treino em português e legislação jurídica. |
-| OpenAI | `gpt-4o-mini` | **Plano B** — responde quando a Maritaca falha. |
+| Maritaca | `sabia-4` | **Principal**: modelo brasileiro, com pré-treino em português e legislação. |
+| OpenAI | `gpt-4o-mini` | **Reserva**: responde quando o principal falha. |
 
-Quem decide o modelo é o servidor, não a página. `LLM_PROVEDORES` define a ordem de tentativa (padrão: `maritaca,openai`): se o primeiro falhar (fora do ar, chave inválida, limite de uso ou demora acima de `LLM_TIMEOUT` segundos), a mesma pergunta vai para o próximo. A resposta indica qual modelo respondeu. Com um provedor só na lista, não há plano B.
+O servidor decide qual modelo usar. `LLM_PROVEDORES` define a ordem de tentativa (padrão: `maritaca,openai`). Se o primeiro falhar (fora do ar, chave inválida, limite de uso ou demora acima de `LLM_TIMEOUT` segundos), a mesma pergunta vai para o próximo. A resposta informa qual modelo respondeu.
+
+Os dois usam a API compatível com a OpenAI, então trocar de modelo é questão de configuração: URL base, chave e nome do modelo.
 
 ---
 
 ## Arquitetura
 
-- **Frontend:** página única em HTML, CSS e JavaScript (`frontend/index.html`), servida pela própria API em `/`.
-- **Backend:** Python 3.13 + FastAPI, organizado em camadas (rotas → serviços → persistência).
-- **Persistência:** PostgreSQL com a extensão pgvector — dados estruturados e vetores no mesmo banco.
-- **Embeddings:** `text-embedding-3-small` da OpenAI (1536 dimensões), por API. Qualquer provedor com API compatível com a OpenAI serve (ver `EMBEDDING_*` na configuração).
-
-Cada chunk guarda o texto e o seu vetor na mesma linha da tabela `chunks` (ver "Persistência dos vetores"). Textos de lei recebem tratamento próprio na fragmentação (ver "Fragmentação de textos legais").
+- **Interface:** página única em HTML, CSS e JavaScript (`frontend/index.html`), servida pela própria API em `/`.
+- **API:** Python 3.13 e FastAPI, em camadas (rotas → serviços → persistência).
+- **Banco:** PostgreSQL com a extensão pgvector. Dados e vetores ficam no mesmo banco.
+- **Embeddings:** `text-embedding-3-small` da OpenAI (1536 dimensões). Qualquer provedor com API compatível com a OpenAI serve (ver `EMBEDDING_*` na configuração).
 
 ---
 
-## Pré-requisitos
+## Começando
+
+### Pré-requisitos
 
 - Python 3.13
-- Um Postgres com pgvector — em geral o Neon (ver "Hospedagem")
-- Chave da OpenAI (embeddings) e da Maritaca (respostas)
+- Um PostgreSQL com pgvector, como o [Neon](https://neon.tech) ou o [Supabase](https://supabase.com)
+- Chaves de API da Maritaca e da OpenAI
 
----
-
-## Instalação
+### Instalação
 
 ```bash
 python -m venv .venv
@@ -49,19 +67,28 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
----
+### Configuração
 
-## Configuração
+Crie um arquivo `.env` na raiz do projeto. O mínimo é isto:
 
-Crie um arquivo `.env` na raiz do projeto com o seguinte conteúdo (substitua as chaves pelas suas):
+```env
+DATABASE_URL=postgresql://usuario:senha@host/banco?sslmode=require
+MARITACA_API_KEY=sua_chave_maritaca
+OPENAI_API_KEY=sua_chave_openai
+```
+
+A URL do banco pode ser colada como o provedor a entrega (`postgresql://...`): a API ajusta o driver sozinha.
+
+<details>
+<summary>Todas as opções</summary>
 
 ```env
 # ── Banco de dados ───────────────────────────────────────
-DATABASE_URL=postgresql://usuario:senha@host.neon.tech/neondb?sslmode=require
+DATABASE_URL=postgresql://usuario:senha@host/banco?sslmode=require
 
 # ── Modelos de linguagem ─────────────────────────────────
-LLM_PROVEDORES=maritaca,openai   # ordem de tentativa (plano B)
-LLM_TIMEOUT=60
+LLM_PROVEDORES=maritaca,openai   # ordem de tentativa
+LLM_TIMEOUT=60                   # segundos antes de passar ao próximo
 
 MARITACA_API_KEY=sua_chave_maritaca
 MARITACA_MODEL=sabia-4
@@ -77,7 +104,7 @@ EMBEDDING_API_KEY=          # vazio: usa a OPENAI_API_KEY
 EMBEDDING_DIM=1536
 
 # ── Acesso ───────────────────────────────────────────────
-API_TOKEN=                  # vazio: API aberta (só para uso local)
+API_TOKEN=                  # vazio: API aberta, sem token
 CORS_ORIGINS=               # vazio: só a própria API
 
 # ── Recuperação e fragmentação ───────────────────────────
@@ -91,72 +118,41 @@ LOG_LEVEL=INFO
 LOG_FILE=                   # vazio: só stdout
 ```
 
-> Bastam `MARITACA_API_KEY` (respostas) e `OPENAI_API_KEY` (embeddings e o plano B das respostas).
->
-> `EMBEDDING_MODEL` e `EMBEDDING_DIM` andam juntos e definem a coluna `vector(N)` do banco. Para trocar de modelo, recrie o banco e indexe os documentos de novo.
+`EMBEDDING_MODEL` e `EMBEDDING_DIM` andam juntos e definem a coluna `vector(N)` do banco. Para trocar de modelo de embeddings, recrie o banco e indexe os documentos de novo.
 
----
+</details>
 
-## Execução
-
-1. Iniciar a API (dentro da pasta `backend/`), com o `DATABASE_URL` do `.env` apontando para o banco. Ao iniciar, ela habilita o pgvector e cria as tabelas que faltarem:
+### Execução
 
 ```bash
 cd backend
 python -m uvicorn app.main:app --reload --port 8001
 ```
 
-2. Abrir a interface em `http://localhost:8001/` (a API serve o `index.html` na raiz).
+Ao iniciar, a API habilita o pgvector e cria as tabelas que faltarem.
 
-Documentação interativa da API (Swagger): `http://localhost:8001/docs`.
+- Interface: `http://localhost:8001/`
+- Documentação interativa da API: `http://localhost:8001/docs`
 
-> A porta 8001 (e não a padrão 8000) deixa o produto rodar ao mesmo tempo que o TCC.
->
-> Apontar o `.env` local para o banco de produção mistura testes com dados reais. Enquanto o site não tiver usuários isso é aceitável; depois, use uma branch de desenvolvimento do Neon.
-
----
-
-## Hospedagem
-
-Em produção são duas peças:
-
-1. **Banco:** um Postgres gerenciado com pgvector, como [Neon](https://neon.tech) ou [Supabase](https://supabase.com). Copie a URL de conexão (`postgresql://...`); a API acrescenta o driver sozinha. As tabelas são criadas na primeira inicialização.
-2. **API:** uma plataforma que rode Python a partir do repositório, como [Render](https://render.com) ou [Railway](https://railway.app).
-
-**Caminho pronto: Neon + Render.**
-
-1. No Neon, crie um projeto na região **AWS US East (N. Virginia)** e copie a connection string (`postgresql://...?sslmode=require`).
-2. No Render, **New → Blueprint** e escolha este repositório: o `render.yaml` cria o serviço na região Virginia, a mesma do banco.
-3. O Render pede `DATABASE_URL`, `MARITACA_API_KEY` e `OPENAI_API_KEY`; o `API_TOKEN` é gerado por ele (copie-o em **Environment** para usar a página).
-4. Quando o deploy terminar, `https://<serviço>.onrender.com/health` deve responder `"database": true`.
-
-O plano `free` do Render dorme após 15 minutos sem acesso e leva cerca de um minuto para acordar; para demonstrações, o plano pago mais simples evita isso.
-
-Em outra plataforma, a configuração é esta:
-   - **Build:** `pip install -r requirements.txt`
-   - **Start:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-   - **Python:** 3.13 (arquivo `.python-version`; no Render, também pela variável `PYTHON_VERSION`)
-   - **Health check:** `/health`
-   - **Variáveis:** `DATABASE_URL`, `MARITACA_API_KEY`, `OPENAI_API_KEY` e `API_TOKEN` (um valor longo e aleatório)
-
-Com `API_TOKEN` definido, as rotas `/api/v1` exigem o cabeçalho `X-API-Key`. A página pede o token na primeira chamada recusada e o guarda no navegador. A página e o `/health` continuam públicos.
-
-**Uma instância só.** A indexação roda em segundo plano no próprio processo da API: o upload responde na hora, e o status do documento (`processando`, `concluido` ou `erro`) aparece em `GET /documentos`. Se o servidor reiniciar no meio, o documento fica com erro e basta reindexá-lo pela página (ou enviar o arquivo de novo). Com mais de uma instância, isso precisaria de uma fila.
+Com `--reload`, a API reinicia a cada alteração no código. A página é lida a cada acesso, então basta recarregar o navegador.
 
 ---
 
 ## Uso
 
-- **Indexar um documento:** use a área de upload na interface e selecione um arquivo PDF, TXT ou HTML, informando um título.
-- **Consultar:** digite a pergunta jurídica e clique em Consultar. A resposta vem acompanhada das fontes utilizadas e seus escores de similaridade.
+1. **Indexe documentos:** na área "Indexar documento", envie um PDF, TXT ou HTML com um título. A indexação continua em segundo plano, e o andamento aparece na lista de documentos.
+2. **Pergunte:** digite a pergunta e clique em **Consultar** (ou `Ctrl + Enter`). A resposta vem com as fontes numeradas.
+3. **Refine, se precisar:** "Filtrar por documento" restringe a busca a um documento.
 
-Indexação em lote (todos os arquivos de uma pasta):
+Para indexar uma pasta inteira de uma vez:
 
 ```bash
-python scripts/indexar_documentos.py --pasta ./data/raw --fonte-id 1
+python scripts/indexar_documentos.py --pasta ./caminho/da/pasta --fonte-id 3
 ```
 
-A pasta `leis/` guarda algumas leis prontas para indexar em testes (LC 142/2013, Lei 8.213/91 e Lei 8.742/93):
+`--fonte-id` é opcional e liga os documentos a uma fonte cadastrada (`GET /api/v1/fontes`). Num banco novo, `3` é "Planalto - Legislação Federal". Sem ela, as respostas mostram "Fonte desconhecida".
+
+A pasta `leis/` traz três leis prontas para começar: LC 142/2013, Lei 8.213/91 e Lei 8.742/93.
 
 ```bash
 python scripts/indexar_documentos.py --pasta ./leis
@@ -164,43 +160,81 @@ python scripts/indexar_documentos.py --pasta ./leis
 
 ---
 
-## Endpoints principais
+## Publicação
+
+O projeto roda em duas peças:
+
+1. **Banco:** um PostgreSQL gerenciado com pgvector, como [Neon](https://neon.tech) ou [Supabase](https://supabase.com). As tabelas são criadas na primeira inicialização.
+2. **API:** uma plataforma que rode Python a partir do repositório, como [Render](https://render.com) ou [Railway](https://railway.app).
+
+### Neon + Render
+
+1. No Neon, crie um projeto na região **AWS US East (N. Virginia)** e copie a connection string.
+2. No Render, use **New → Blueprint** e escolha este repositório. O `render.yaml` cria o serviço na mesma região do banco.
+3. Informe `DATABASE_URL`, `MARITACA_API_KEY` e `OPENAI_API_KEY`. O `API_TOKEN` é gerado pelo Render; copie-o em **Environment** para acessar a página.
+4. Quando o deploy terminar, `https://<serviço>.onrender.com/health` deve responder `"database": true`.
+
+A cada push no `main`, o Render publica a versão nova automaticamente.
+
+No plano gratuito, o serviço dorme após 15 minutos sem acesso e leva cerca de um minuto para acordar.
+
+### Outras plataformas
+
+- **Build:** `pip install -r requirements.txt`
+- **Start:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- **Python:** 3.13 (arquivo `.python-version`)
+- **Health check:** `/health`
+- **Variáveis:** `DATABASE_URL`, `MARITACA_API_KEY`, `OPENAI_API_KEY` e `API_TOKEN` (um valor longo e aleatório)
+
+### Acesso
+
+Com `API_TOKEN` definido, as rotas `/api/v1` exigem o cabeçalho `X-API-Key`. A página pede o token na primeira chamada recusada e o guarda no navegador. A página e o `/health` continuam públicos.
+
+### Uma instância
+
+A indexação roda em segundo plano no próprio processo da API: o envio responde na hora, e o status do documento (`processando`, `concluido` ou `erro`) aparece na lista. Se o servidor reiniciar durante uma indexação, o documento fica com erro e basta reindexá-lo pela página. Para rodar mais de uma instância, a indexação precisaria de uma fila.
+
+---
+
+## API
 
 Prefixo: `/api/v1`
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `POST` | `/consultar` | Consulta; o modelo segue `LLM_PROVEDORES`, com plano B. Responde `502` se todos os modelos ou a API de embeddings falharem. |
+| `POST` | `/consultar` | Responde a uma pergunta, com fontes. Responde `502` se todos os modelos ou a API de embeddings falharem. |
+| `GET` | `/historico` | Consultas recentes. |
+| `GET` | `/historico/{id}` | Resposta salva e fontes de uma consulta, sem chamar o modelo de novo. |
+| `GET` | `/sugestoes` | Perguntas sugeridas a partir dos documentos indexados. |
 | `POST` | `/ingerir` | Recebe um documento e o indexa em segundo plano (responde `202`). |
-| `GET`  | `/documentos` | Lista os documentos, o status da indexação e o total de trechos de cada um. |
-| `POST` | `/documentos/{id}/reindexar` | Refaz chunks e embeddings a partir do texto salvo (responde `202`). |
-| `DELETE` | `/documentos/{id}` | Exclui o documento e seus chunks; o histórico de consultas é mantido. |
-| `GET`  | `/historico` | Histórico de consultas. |
-| `GET`  | `/historico/{id}` | Resposta salva e fontes de uma consulta, sem chamar o LLM de novo. |
+| `GET` | `/documentos` | Documentos, status da indexação e total de trechos de cada um. |
+| `POST` | `/documentos/{id}/reindexar` | Refaz trechos e embeddings a partir do texto salvo (responde `202`). |
+| `DELETE` | `/documentos/{id}` | Exclui o documento e seus trechos; o histórico de consultas é mantido. |
+| `GET` | `/fontes` | Fontes cadastradas (tribunais, Planalto etc.). |
 
 ---
 
-## Persistência dos vetores
+## Detalhes técnicos
 
-Os vetores ficam na coluna `chunks.embedding` (`vector(1536)`, extensão pgvector), ao lado do texto do chunk:
+### Vetores
 
-- **Busca:** produto interno (operador `<#>`) sobre embeddings normalizados — equivalente à similaridade de cosseno.
-- **Busca exata:** não há índice vetorial aproximado. Com poucos milhares de chunks a varredura é rápida e o resultado é determinístico. Se o volume crescer, crie um índice HNSW: `CREATE INDEX ON chunks USING hnsw (embedding vector_ip_ops);`
-- **Filtro por documento:** feito na própria consulta SQL (`WHERE id_documento = ...`).
+Os vetores ficam na coluna `chunks.embedding` (`vector(1536)`), ao lado do texto de cada trecho.
+
+- **Busca:** produto interno (operador `<#>`) sobre embeddings normalizados, o que equivale à similaridade de cosseno.
+- **Busca exata:** não há índice aproximado. Com poucos milhares de trechos a varredura é rápida e o resultado é determinístico. Se o volume crescer, crie um índice HNSW: `CREATE INDEX ON chunks USING hnsw (embedding vector_ip_ops);`
+- **Filtro por documento:** aplicado na própria consulta SQL.
 - **Consistência:** texto e vetores de um documento são gravados na mesma transação.
 
----
+### Textos legais
 
-## Fragmentação de textos legais
+Leis copiadas do Planalto ("texto compilado") trazem todas as redações que cada dispositivo já teve, inclusive as de medidas provisórias que perderam a vigência. Quando o texto tem vários `Art. N` no início de linha, a indexação (`backend/app/services/texto_legal.py`):
 
-Leis copiadas do Planalto ("texto compilado") trazem todas as redações que cada dispositivo já teve, em ordem cronológica, inclusive as de medidas provisórias que perderam a vigência. Quando o texto tem vários `Art. N` no início de linha, a ingestão (`backend/app/services/texto_legal.py`):
+1. **Mantém só a redação vigente:** reconhece a hierarquia artigo > parágrafo > inciso > alínea > item. Quando um dispositivo reaparece sob o mesmo pai, a redação nova substitui a anterior.
+2. **Resume os revogados:** um dispositivo revogado vira só rótulo e nota, por exemplo `IV - (Revogada pela Lei nº 9.032, de 1995)`.
+3. **Divide por artigo:** um trecho nunca mistura dois artigos. Um artigo longo é dividido nos limites dos dispositivos, e cada trecho repete o caput resumido no início.
+4. **Entrega o artigo inteiro ao modelo:** a busca usa os trechos pequenos, mas o artigo encontrado é remontado e enviado inteiro, se tiver até `ARTIGO_MAX_CHARS` caracteres.
 
-1. **Mantém só a redação vigente:** reconhece a hierarquia artigo > parágrafo > inciso > alínea > item; quando um dispositivo reaparece sob o mesmo pai, a redação nova substitui a anterior (com os filhos dela).
-2. **Resume os revogados:** um dispositivo revogado vira só rótulo + nota, por exemplo `IV - (Revogada pela Lei nº 9.032, de 1995)`, e os filhos dele são descartados.
-3. **Divide por artigo:** um chunk nunca mistura dois artigos. Um artigo longo é dividido nos limites dos dispositivos, e cada chunk repete o caput (resumido) no início.
-4. **Entrega o artigo inteiro ao LLM:** a busca continua sobre os chunks pequenos, mas o artigo do chunk encontrado é remontado e enviado inteiro ao modelo, se tiver até `ARTIGO_MAX_CHARS` caracteres. Artigos repetidos entre os resultados contam uma vez só.
-
-Títulos, capítulos e seções são descartados. Ementa e assinaturas são fragmentadas por parágrafos, assim como documentos que não são leis.
+Títulos, capítulos e seções são descartados. Ementa, assinaturas e documentos que não são leis são divididos por parágrafos.
 
 ---
 
@@ -211,4 +245,4 @@ cd backend
 pytest tests/ -v
 ```
 
-A suíte cobre fragmentação de texto (incluindo redação vigente e divisão por artigo das leis), leitura de arquivos, embeddings por API, indexação em segundo plano, integridade (hash anti-duplicação), token de acesso, serviço de recuperação/geração e rotas da API, usando mocks para o banco e os serviços externos.
+A suíte cobre a divisão de textos (incluindo redação vigente e divisão por artigo), leitura de arquivos, embeddings, indexação em segundo plano, controle de duplicados, token de acesso, busca, geração com modelo reserva e as rotas da API. Banco e serviços externos são simulados, então os testes não precisam de chaves nem de conexão.
