@@ -189,7 +189,6 @@ def registrar_documento(
     db: Session,
     caminho: str,
     titulo: str,
-    id_fonte: int | None = None,
 ) -> Tuple[Documento, bool]:
     """
     Devolve (documento, precisa_processar). Um arquivo já enviado é
@@ -211,7 +210,6 @@ def registrar_documento(
     doc = Documento(
         titulo=titulo,
         texto=texto,
-        id_fonte=id_fonte,
         hash_integridade=hash_doc,
         arquivo_origem=os.path.basename(caminho),
         status=STATUS_PROCESSANDO,
@@ -284,24 +282,6 @@ def preparar_reindexacao(db: Session, doc: Documento) -> None:
     _apagar_chunks(db, doc.id)
     doc.status, doc.erro = STATUS_PROCESSANDO, None
     db.commit()
-
-
-def ingerir_documento(
-    db: Session,
-    caminho: str,
-    titulo: str,
-    id_fonte: int | None = None,
-) -> Documento:
-    """Pipeline completo, de uma vez (usado pelo script de indexação em lote)."""
-    doc, precisa_processar = registrar_documento(
-        db, caminho, titulo, id_fonte=id_fonte,
-    )
-    if precisa_processar:
-        processar_documento(doc.id)
-        db.refresh(doc)
-        if doc.status == STATUS_ERRO:
-            raise RuntimeError(doc.erro)
-    return doc
 
 
 # ─────────────────────────────────────────────

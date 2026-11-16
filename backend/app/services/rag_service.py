@@ -110,10 +110,9 @@ def _get_llm(provedor: str) -> Callable[[str], str]:
 def _montar_contexto(chunks_com_score: List[Dict]) -> str:
     partes = []
     for i, item in enumerate(chunks_com_score, 1):
-        fonte = item.get("fonte", "Fonte desconhecida")
         titulo = item.get("titulo", "Documento")
         texto = item.get("texto_chunk", "")
-        partes.append(f"[Documento {i}] {titulo} ({fonte})\n{texto}")
+        partes.append(f"[Documento {i}] {titulo}\n{texto}")
     return "\n\n---\n\n".join(partes)
 
 
@@ -128,7 +127,7 @@ def _recuperar_chunks(
     id_documento: int | None = None,
 ) -> List[Dict]:
     """
-    Retorna os chunks mais relevantes já enriquecidos com título/fonte.
+    Retorna os chunks mais relevantes já enriquecidos com o título do documento.
     Se id_documento for informado, a busca é restrita àquele documento
     (filtro aplicado no próprio banco, junto da busca vetorial).
 
@@ -219,7 +218,6 @@ def _descrever_fonte(chunk: Chunk, texto: str, score: float, exato: bool = False
     return {
         "chunk_id": chunk.id,
         "titulo": doc.titulo if doc else "Documento",
-        "fonte": doc.fonte.nome if doc and doc.fonte else "Fonte desconhecida",
         "texto_chunk": texto,
         "score": score,
         # artigo citado pelo número na pergunta (não veio da busca semântica)
@@ -356,7 +354,7 @@ def obter_consulta(db: Session, id_consulta: int) -> Optional[Dict[str, Any]]:
             fontes.append({
                 "chunk_id": None,
                 "titulo": "Trecho indisponível",
-                "fonte": "O documento foi excluído ou reindexado",
+                "aviso": "O documento foi excluído ou reindexado",
                 "texto_chunk": "",
                 "score": usado.score,
             })

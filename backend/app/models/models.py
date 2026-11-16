@@ -3,25 +3,13 @@ Modelos ORM — são a definição do esquema: criar_tabelas() cria as
 tabelas a partir deles ao iniciar a API.
 """
 from sqlalchemy import (
-    Column, Integer, String, Text, Date, Float,
+    Column, Integer, String, Text, Float,
     DateTime, ForeignKey, func
 )
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from app.core.config import get_settings
 from app.core.database import Base
-
-
-class Fonte(Base):
-    __tablename__ = "fontes"
-
-    id        = Column(Integer, primary_key=True, index=True)
-    nome      = Column(String(255), nullable=False)
-    tipo      = Column(String(100), nullable=False)
-    url_base  = Column(Text)
-    criado_em = Column(DateTime, default=func.now())
-
-    documentos = relationship("Documento", back_populates="fonte")
 
 
 # status da indexação de um documento
@@ -36,8 +24,6 @@ class Documento(Base):
     id               = Column(Integer, primary_key=True, index=True)
     titulo           = Column(String(500), nullable=False)
     texto            = Column(Text, nullable=False)
-    data_publicacao  = Column(Date)
-    id_fonte         = Column(Integer, ForeignKey("fontes.id", ondelete="SET NULL"))
     hash_integridade = Column(String(64), unique=True)
     arquivo_origem   = Column(String(500))
     status           = Column(String(20), nullable=False, default=STATUS_CONCLUIDO)
@@ -45,7 +31,6 @@ class Documento(Base):
     erro             = Column(Text, nullable=True)
     criado_em        = Column(DateTime, default=func.now())
 
-    fonte  = relationship("Fonte", back_populates="documentos")
     chunks = relationship("Chunk", back_populates="documento", cascade="all, delete")
 
 

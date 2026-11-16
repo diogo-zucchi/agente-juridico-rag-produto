@@ -829,7 +829,7 @@
           <strong>${esc(f.titulo)}</strong>
         </div>
         <div class="fonte-meta">
-          <span>${esc(f.fonte)}</span>
+          ${f.aviso ? `<span>${esc(f.aviso)}</span>` : ""}
           <span class="barra" title="relevância"><i style="width:${largura}%;animation-delay:${150+i*50}ms"></i></span>
           <span class="score">${score.toFixed(3)}</span>
           ${f.exato ? '<span class="selo-exato" title="Artigo citado pelo número na pergunta, recuperado pelo texto exato">artigo citado</span>' : ""}
@@ -857,7 +857,7 @@
 
   async function copiarResposta(){
     if(!respostaAtual) return;
-    const fontes = respostaAtual.fontes.map((f, i) => `[${i+1}] ${f.titulo} — ${f.fonte}`).join("\n");
+    const fontes = respostaAtual.fontes.map((f, i) => `[${i+1}] ${f.titulo}`).join("\n");
     const texto = respostaAtual.resposta + (fontes ? `\n\nFontes:\n${fontes}` : "");
     try{
       await navigator.clipboard.writeText(texto);

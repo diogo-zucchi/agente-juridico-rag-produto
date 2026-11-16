@@ -9,7 +9,7 @@ Você envia leis, pareceres ou decisões e faz perguntas como faria a um colega.
 ## Funcionalidades
 
 - **Perguntas em linguagem natural:** a busca é semântica, então a pergunta não precisa repetir as palavras exatas da lei.
-- **Respostas com fontes:** cada resposta indica os trechos usados (`[1]`, `[2]`…), com o documento de origem e o grau de relevância.
+- **Respostas com fontes:** cada resposta indica os trechos usados (`[1]`, `[2]`…), com o documento de onde vieram e o grau de relevância.
 - **Artigos citados pelo número:** perguntas como "o que diz o Art. 20 da Lei 8.742?" trazem o texto exato do artigo.
 - **Leis tratadas como leis:** em textos compilados do Planalto, só a redação vigente é indexada; dispositivos revogados viram uma nota curta.
 - **Filtro por documento:** a busca pode ser restrita a um único documento quando a pergunta exige precisão.
@@ -144,19 +144,7 @@ Com `--reload`, a API reinicia a cada alteração no código. A página é lida 
 2. **Pergunte:** digite a pergunta e clique em **Consultar** (ou `Ctrl + Enter`). A resposta vem com as fontes numeradas.
 3. **Refine, se precisar:** "Filtrar por documento" restringe a busca a um documento.
 
-Para indexar uma pasta inteira de uma vez:
-
-```bash
-python scripts/indexar_documentos.py --pasta ./caminho/da/pasta --fonte-id 3
-```
-
-`--fonte-id` é opcional e liga os documentos a uma fonte cadastrada (`GET /api/v1/fontes`). Num banco novo, `3` é "Planalto - Legislação Federal". Sem ela, as respostas mostram "Fonte desconhecida".
-
-A pasta `leis/` traz três leis prontas para começar: LC 142/2013, Lei 8.213/91 e Lei 8.742/93.
-
-```bash
-python scripts/indexar_documentos.py --pasta ./leis
-```
+A pasta `leis/` traz três leis prontas para começar: LC 142/2013, Lei 8.213/91 e Lei 8.742/93. Basta enviá-las pela página.
 
 ---
 
@@ -210,7 +198,6 @@ Prefixo: `/api/v1`
 | `GET` | `/documentos` | Documentos, status da indexação e total de trechos de cada um. |
 | `POST` | `/documentos/{id}/reindexar` | Refaz trechos e embeddings a partir do texto salvo (responde `202`). |
 | `DELETE` | `/documentos/{id}` | Exclui o documento e seus trechos; o histórico de consultas é mantido. |
-| `GET` | `/fontes` | Fontes cadastradas (tribunais, Planalto etc.). |
 
 ---
 

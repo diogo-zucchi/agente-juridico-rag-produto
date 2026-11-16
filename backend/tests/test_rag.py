@@ -312,7 +312,6 @@ class TestRagService:
         chunk.id_documento = 3
         chunk.texto_chunk = "Parecer sem artigos."
         chunk.documento.titulo = "Lei 8.213/91"
-        chunk.documento.fonte.nome = "Planalto"
 
         with patch("app.services.rag_service.buscar_chunks",
                    return_value=[(chunk, 0.9)]) as busca:
@@ -322,7 +321,6 @@ class TestRagService:
         assert fontes == [{
             "chunk_id": 10,
             "titulo": "Lei 8.213/91",
-            "fonte": "Planalto",
             "texto_chunk": "Parecer sem artigos.",
             "score": 0.9,
             "exato": False,
@@ -463,6 +461,9 @@ class TestAPI:
             )
         assert r.status_code == 200
         assert "resposta" in r.json()
+
+    def test_rota_de_fontes_removida(self, client):
+        assert client.get("/api/v1/fontes").status_code == 404
 
     def test_rotas_de_avaliacao_removidas(self, client):
         assert client.post("/api/v1/comparar", json={"pergunta": "x"}).status_code == 404
@@ -626,7 +627,7 @@ class TestIngestaoEmSegundoPlano:
 # ─────────────────────────────────────────────
 
 class TestErrosDeProvedor:
-    FONTES = [{"chunk_id": 1, "titulo": "Lei", "fonte": "x", "texto_chunk": "Art. 1º", "score": .9}]
+    FONTES = [{"chunk_id": 1, "titulo": "Lei", "texto_chunk": "Art. 1º", "score": .9}]
 
     def _config(self, provedores):
         return MagicMock(llm_provedores=provedores, top_k_results=5)
@@ -658,7 +659,7 @@ class TestErrosDeProvedor:
 
     def test_falha_do_llm_vira_erro_provedor(self):
         from app.services import rag_service
-        fontes = [{"chunk_id": 1, "titulo": "Lei", "fonte": "x", "texto_chunk": "Art. 1º", "score": .9}]
+        fontes = [{"chunk_id": 1, "titulo": "Lei", "texto_chunk": "Art. 1º", "score": .9}]
         llm = MagicMock(side_effect=RuntimeError("401 da API"))
         with patch.object(rag_service, "_recuperar_chunks", return_value=fontes), \
              patch.object(rag_service, "_get_llm", return_value=llm):
@@ -691,7 +692,6 @@ class TestObterConsulta:
         from app.services import rag_service
         chunk = MagicMock(id=5, texto_chunk="Parecer sem artigo.")
         chunk.documento.titulo = "Parecer"
-        chunk.documento.fonte.nome = "AGU"
         usados = [MagicMock(id=2, chunk=None, score=.5), MagicMock(id=1, chunk=chunk, score=.9)]
         consulta = MagicMock(id=3, pergunta="P?", data_hora=datetime(2026, 1, 1))
         consulta.resposta.texto_resposta = "R [1]"
@@ -981,7 +981,6 @@ class TestRecuperacaoComArtigoCitado:
     def _chunk(self, id_, id_documento, texto, titulo="Lei"):
         chunk = MagicMock(id=id_, id_documento=id_documento, texto_chunk=texto)
         chunk.documento.titulo = titulo
-        chunk.documento.fonte.nome = "Planalto"
         return chunk
 
     def _recuperar(self, pergunta, exatos, semanticos, k=5, id_documento=None):
@@ -1050,11 +1049,12 @@ class TestRecuperacaoComArtigoCitado:
 
     def test_titulo_da_lei_chega_ao_llm(self):
         from app.services.rag_service import PROMPT_JURIDICO, _montar_contexto
-        fontes = [{"titulo": "Lei 8.742/93", "fonte": "Planalto", "texto_chunk": "Art. 21. A"},
-                  {"titulo": "Lei 8.213/91", "fonte": "Planalto", "texto_chunk": "Art. 21. B"}]
+        fontes = [{"titulo": "Lei 8.742/93", "texto_chunk": "Art. 21. A"},
+                  {"titulo": "Lei 8.213/91", "texto_chunk": "Art. 21. B"}]
         contexto = _montar_contexto(fontes)
         assert "[Documento 1] Lei 8.742/93" in contexto
         assert "[Documento 2] Lei 8.213/91" in contexto
+        assert "Fonte desconhecida" not in contexto
         assert "lei específica" in PROMPT_JURIDICO
 
     def test_artigo_inexistente_segue_com_a_semantica(self):
