@@ -188,7 +188,6 @@ def registrar_documento(
     caminho: str,
     titulo: str,
     id_fonte: int | None = None,
-    nivel_dificuldade: str | None = None,
 ) -> Tuple[Documento, bool]:
     """
     Devolve (documento, precisa_processar). Um arquivo já enviado é
@@ -211,7 +210,6 @@ def registrar_documento(
         titulo=titulo,
         texto=texto,
         id_fonte=id_fonte,
-        nivel_dificuldade=nivel_dificuldade,
         hash_integridade=hash_doc,
         arquivo_origem=os.path.basename(caminho),
         status=STATUS_PROCESSANDO,
@@ -260,11 +258,10 @@ def ingerir_documento(
     caminho: str,
     titulo: str,
     id_fonte: int | None = None,
-    nivel_dificuldade: str | None = None,
 ) -> Documento:
     """Pipeline completo, de uma vez (usado pelo script de indexação em lote)."""
     doc, precisa_processar = registrar_documento(
-        db, caminho, titulo, id_fonte=id_fonte, nivel_dificuldade=nivel_dificuldade,
+        db, caminho, titulo, id_fonte=id_fonte,
     )
     if precisa_processar:
         processar_documento(doc.id)

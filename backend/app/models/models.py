@@ -2,9 +2,8 @@
 Modelos ORM — são a definição do esquema: criar_tabelas() cria as
 tabelas a partir deles, tanto no Docker local quanto num banco hospedado.
 """
-from datetime import datetime, date
 from sqlalchemy import (
-    CheckConstraint, Column, Integer, String, Text, Date, Float,
+    Column, Integer, String, Text, Date, Float,
     DateTime, ForeignKey, func
 )
 from sqlalchemy.orm import relationship
@@ -38,8 +37,6 @@ class Documento(Base):
     titulo           = Column(String(500), nullable=False)
     texto            = Column(Text, nullable=False)
     data_publicacao  = Column(Date)
-    # rótulo do experimento: 'facil', 'medio' ou 'dificil'
-    nivel_dificuldade = Column(String(20), nullable=True)
     id_fonte         = Column(Integer, ForeignKey("fontes.id", ondelete="SET NULL"))
     hash_integridade = Column(String(64), unique=True)
     arquivo_origem   = Column(String(500))
@@ -80,7 +77,7 @@ class Consulta(Base):
     # use_alter: consultas e respostas se referenciam (FK criada por ALTER TABLE)
     id_resposta = Column(Integer, ForeignKey("respostas.id", ondelete="SET NULL", use_alter=True),
                          nullable=True)
-    # documento usado no teste (quando a busca é restrita a 1 documento)
+    # documento consultado (quando a busca é restrita a 1 documento)
     id_documento = Column(Integer, ForeignKey("documentos.id", ondelete="SET NULL"), nullable=True)
 
     resposta = relationship("Resposta", back_populates="consulta",
@@ -93,7 +90,7 @@ class Resposta(Base):
 
     id             = Column(Integer, primary_key=True, index=True)
     texto_resposta = Column(Text, nullable=False)
-    # qual LLM gerou esta resposta: 'maritaca' ou 'deepseek'
+    # qual LLM gerou esta resposta: 'maritaca' ou 'openai'
     modelo_llm     = Column(String(50), nullable=True)
     data_hora      = Column(DateTime, default=func.now())
     id_consulta    = Column(Integer, ForeignKey("consultas.id", ondelete="CASCADE"))
@@ -101,8 +98,6 @@ class Resposta(Base):
     consulta  = relationship("Consulta", back_populates="resposta",
                               foreign_keys=[Consulta.id_resposta])
     documentos_utilizados = relationship("RespostaDocumento", back_populates="resposta")
-    avaliacoes = relationship("Avaliacao", back_populates="resposta",
-                              cascade="all, delete")
 
 
 class RespostaDocumento(Base):
@@ -117,16 +112,3 @@ class RespostaDocumento(Base):
     resposta = relationship("Resposta", back_populates="documentos_utilizados")
     chunk    = relationship("Chunk", back_populates="respostas")
 
-
-class Avaliacao(Base):
-    __tablename__ = "avaliacoes"
-    __table_args__ = (CheckConstraint("nota BETWEEN 1 AND 5", name="avaliacoes_nota_check"),)
-
-    id          = Column(Integer, primary_key=True, index=True)
-    id_resposta = Column(Integer, ForeignKey("respostas.id", ondelete="CASCADE"))
-    nota        = Column(Integer, nullable=False)   # 1 a 5
-    comentario  = Column(Text, nullable=True)
-    avaliador   = Column(String(255), nullable=True)
-    data_hora   = Column(DateTime, default=func.now())
-
-    resposta = relationship("Resposta", back_populates="avaliacoes")

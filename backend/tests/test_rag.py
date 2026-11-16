@@ -218,9 +218,9 @@ class TestTextoLegal:
     def test_lei_8213_art_16_so_com_redacao_vigente(self):
         from pathlib import Path
         arquivo = (Path(__file__).resolve().parents[2]
-                   / "leis-e-perguntas-avaliacao" / "lei_8213_91_dificil.txt")
+                   / "leis" / "lei_8213_91.txt")
         if not arquivo.exists():
-            pytest.skip("arquivo de avaliação ausente")
+            pytest.skip("arquivo da lei ausente")
 
         chunks = _dividir_em_chunks(arquivo.read_text(encoding="utf-8"))
         art16 = [c for c in chunks if c.startswith("Art. 16.")]
@@ -463,8 +463,21 @@ class TestAPI:
         assert r.status_code == 200
         assert "resposta" in r.json()
 
+    def test_rotas_de_avaliacao_removidas(self, client):
+        assert client.post("/api/v1/comparar", json={"pergunta": "x"}).status_code == 404
+        assert client.post("/api/v1/avaliar", json={"id_resposta": 1, "nota": 5}).status_code == 404
+        assert client.get("/api/v1/resultados").status_code == 404
+        assert client.get("/api/v1/resultados/csv").status_code == 404
+
+    def test_provedor_desconhecido_cai_no_padrao(self):
+        from app.services import rag_service
+        assert "deepseek" not in rag_service.PROVEDORES
+        with patch.object(rag_service, "_recuperar_chunks", return_value=[]),              patch.object(rag_service, "Consulta"), patch.object(rag_service, "Resposta"):
+            r = rag_service.responder_pergunta(MagicMock(), "pergunta", provedor="deepseek")
+        assert r["modelo_llm"] == "maritaca"
+
     def test_ingerir_responde_202_e_agenda_a_indexacao(self, client):
-        doc = MagicMock(id=7, titulo="Lei X", nivel_dificuldade=None, status="processando")
+        doc = MagicMock(id=7, titulo="Lei X", status="processando")
         with patch("app.api.routes.ingestao_service.registrar_documento",
                    return_value=(doc, True)), \
              patch("app.api.routes.ingestao_service.processar_documento") as processar:
@@ -478,7 +491,7 @@ class TestAPI:
         processar.assert_called_once_with(7)
 
     def test_ingerir_arquivo_repetido_nao_reindexa(self, client):
-        doc = MagicMock(id=7, titulo="Lei X", nivel_dificuldade=None, status="concluido")
+        doc = MagicMock(id=7, titulo="Lei X", status="concluido")
         with patch("app.api.routes.ingestao_service.registrar_documento",
                    return_value=(doc, False)), \
              patch("app.api.routes.ingestao_service.processar_documento") as processar:

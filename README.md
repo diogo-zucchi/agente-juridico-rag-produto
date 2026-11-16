@@ -6,21 +6,16 @@ Orientador: Prof. Dr. Francisco Carlos Souza
 
 Sistema de consulta jurídica em linguagem natural. O usuário indexa documentos jurídicos e faz perguntas; o sistema recupera os trechos mais relevantes por busca semântica e gera uma resposta fundamentada citando as fontes, permitindo verificar a procedência de cada informação.
 
-O sistema também inclui um **instrumento de comparação às cegas** entre modelos de linguagem, usado durante o desenvolvimento para fundamentar a escolha do modelo. Esse instrumento não faz parte do fluxo destinado ao usuário final.
-
 ---
 
 ## Modelos de linguagem
 
-A geração das respostas usa o padrão de API compatível com a OpenAI, de modo que a troca de modelo se resume a alterar a URL base, a credencial e o nome do modelo. Três modelos estão integrados:
+A geração das respostas usa o padrão de API compatível com a OpenAI, de modo que a troca de modelo se resume a alterar a URL base, a credencial e o nome do modelo. Dois modelos estão integrados:
 
 | Provedor | Modelo | Papel |
 |----------|--------|-------|
-| Maritaca | `sabia-4` | **Modelo da ferramenta** (produção) — brasileiro, com pré-treino em português e legislação jurídica. |
-| DeepSeek | `deepseek-chat` | Apenas para o estudo comparativo às cegas. |
-| OpenAI | `gpt-4o-mini` | Apenas para o estudo comparativo às cegas. |
-
-A ferramenta opera com o **Sabiá**; DeepSeek e GPT foram integrados exclusivamente para fundamentar a escolha do modelo na etapa de validação.
+| Maritaca | `sabia-4` | **Modelo padrão** — brasileiro, com pré-treino em português e legislação jurídica. |
+| OpenAI | `gpt-4o-mini` | Alternativa, escolhida na interface. |
 
 ---
 
@@ -65,14 +60,9 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=senha
 POSTGRES_DB=agente_juridico
 
-# ── Modelo da ferramenta (produção) ──────────────────────
+# ── Modelos de linguagem ─────────────────────────────────
 MARITACA_API_KEY=sua_chave_maritaca
 MARITACA_MODEL=sabia-4
-
-# ── Modelos do estudo comparativo (avaliação às cegas) ───
-DEEPSEEK_API_KEY=sua_chave_deepseek
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 OPENAI_API_KEY=sua_chave_openai
 OPENAI_MODEL=gpt-4o-mini
@@ -99,7 +89,7 @@ LOG_LEVEL=INFO
 LOG_FILE=                   # vazio: só stdout
 ```
 
-> Para o uso normal da ferramenta bastam `MARITACA_API_KEY` (respostas) e `OPENAI_API_KEY` (embeddings). A chave do DeepSeek só é necessária para o estudo comparativo às cegas.
+> Bastam `MARITACA_API_KEY` (respostas) e `OPENAI_API_KEY` (embeddings e, se escolhido na interface, respostas com o GPT).
 >
 > `EMBEDDING_MODEL` e `EMBEDDING_DIM` andam juntos e definem a coluna `vector(N)` do banco. Para trocar de modelo, recrie o banco e indexe os documentos de novo.
 
@@ -163,14 +153,19 @@ O `backend/Dockerfile` continua disponível para plataformas que preferem imagem
 
 ## Uso
 
-- **Indexar um documento:** use a área de upload na interface e selecione um arquivo PDF, TXT ou HTML, informando um título (e, opcionalmente, um nível de dificuldade usado apenas no experimento).
+- **Indexar um documento:** use a área de upload na interface e selecione um arquivo PDF, TXT ou HTML, informando um título.
 - **Consultar:** digite a pergunta jurídica e clique em Consultar. A resposta vem acompanhada das fontes utilizadas e seus escores de similaridade.
-- **Comparar modelos (estudo):** na aba de avaliação, a mesma pergunta é respondida por todos os modelos sobre o mesmo contexto; as respostas são embaralhadas e exibidas como Resposta A, B, C, sem identificar o modelo, para avaliação às cegas com nota de 1 a 5.
 
 Indexação em lote (todos os arquivos de uma pasta):
 
 ```bash
 python scripts/indexar_documentos.py --pasta ./data/raw --fonte-id 1
+```
+
+A pasta `leis/` guarda algumas leis prontas para indexar em testes (LC 142/2013, Lei 8.213/91 e Lei 8.742/93):
+
+```bash
+python scripts/indexar_documentos.py --pasta ./leis
 ```
 
 ---
@@ -182,10 +177,6 @@ Prefixo: `/api/v1`
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `POST` | `/consultar` | Consulta com um modelo (padrão: Maritaca). |
-| `POST` | `/comparar` | Gera respostas de todos os modelos sobre o mesmo contexto (às cegas). |
-| `POST` | `/avaliar` | Registra a nota (1 a 5) de uma resposta. |
-| `GET`  | `/resultados` | Consolida as notas por modelo e por nível de dificuldade. |
-| `GET`  | `/resultados/csv` | Exporta as avaliações em CSV. |
 | `POST` | `/ingerir` | Recebe um documento e o indexa em segundo plano (responde `202`). |
 | `GET`  | `/documentos` | Lista os documentos e o status da indexação de cada um. |
 | `GET`  | `/historico` | Histórico de consultas. |

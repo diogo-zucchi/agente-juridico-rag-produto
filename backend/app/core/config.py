@@ -12,10 +12,6 @@ class Settings(BaseSettings):
     maritaca_api_key: str = ""
     maritaca_model: str = "sabia-4"
 
-    deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-chat"
-    deepseek_base_url: str = "https://api.deepseek.com"
-
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"

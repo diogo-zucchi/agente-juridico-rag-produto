@@ -1,13 +1,10 @@
-import random
 from typing import List, Dict, Any, Callable
 from openai import OpenAI
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.models import (
-    Consulta, Resposta, RespostaDocumento, Avaliacao
-)
+from app.models.models import Consulta, Resposta, RespostaDocumento
 from app.services.ingestao_service import buscar_chunks, texto_do_artigo
 from app.services.texto_legal import rotulo_do_artigo
 
@@ -25,15 +22,15 @@ Pergunta: {pergunta}
 Resposta fundamentada:"""
 
 # Provedores de LLM suportados
-PROVEDORES = ("maritaca", "deepseek", "openai")
+PROVEDORES = ("maritaca", "openai")
 
 # Cache de invocadores por provedor (criados sob demanda)
 _llms: Dict[str, Callable[[str], str]] = {}
 
 
 # ─────────────────────────────────────────────
-# Fábrica de LLMs (Maritaca e DeepSeek)
-# Ambos usam a interface compatível com a OpenAI,
+# Fábrica de LLMs (Maritaca e OpenAI)
+# Ambas usam a interface compatível com a OpenAI,
 # mudando apenas base_url, api_key e nome do modelo.
 # ─────────────────────────────────────────────
 def _criar_llm(provedor: str) -> Callable[[str], str]:
@@ -47,13 +44,6 @@ def _criar_llm(provedor: str) -> Callable[[str], str]:
         )
         modelo = settings.maritaca_model
 
-    elif provedor == "deepseek":
-        logger.info(f"Carregando LLM DeepSeek ({settings.deepseek_model})")
-        client = OpenAI(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-        )
-        modelo = settings.deepseek_model
     elif provedor == "openai":
         logger.info(f"Carregando LLM OpenAI ({settings.openai_model})")
         client = OpenAI(
@@ -183,7 +173,7 @@ def _salvar_resposta(
 
 
 # ─────────────────────────────────────────────
-# Consulta com UMA LLM (uso normal)
+# Consulta
 # ─────────────────────────────────────────────
 def responder_pergunta(
     db: Session,
@@ -215,159 +205,6 @@ def responder_pergunta(
         "modelo_llm": provedor,
         "resposta": texto,
         "fontes": fontes,
-    }
-
-
-# ─────────────────────────────────────────────
-# Modo COMPARAÇÃO ÀS CEGAS
-# Recupera o contexto UMA vez e gera com as duas LLMs
-# sobre exatamente o mesmo contexto. As respostas são
-# embaralhadas e rotuladas como A/B (sem revelar a LLM).
-# ─────────────────────────────────────────────
-def comparar_llms(
-    db: Session,
-    pergunta: str,
-    id_documento: int | None = None,
-    top_k: int | None = None,
-) -> Dict[str, Any]:
-    settings = get_settings()
-    k = top_k or settings.top_k_results
-
-    # 1. Contexto único e idêntico para ambas as LLMs
-    fontes = _recuperar_chunks(db, pergunta, k, id_documento)
-
-    # 2. Uma consulta, duas respostas
-    consulta = Consulta(pergunta=pergunta, id_documento=id_documento)
-    db.add(consulta)
-    db.flush()
-
-    respostas_salvas = []
-    for provedor in PROVEDORES:
-        texto = _gerar_texto(provedor, fontes, pergunta)
-        resposta = _salvar_resposta(db, consulta, texto, provedor, fontes)
-        respostas_salvas.append(resposta)
-
-    # primeira resposta vira a "principal" no histórico
-    consulta.id_resposta = respostas_salvas[0].id
-    db.commit()
-
-    # 3. Embaralhar e rotular A/B (avaliação às cegas)
-    blocos = [
-        {"resposta_id": r.id, "texto": r.texto_resposta, "modelo_llm": r.modelo_llm}
-        for r in respostas_salvas
-    ]
-    random.shuffle(blocos)
-    rotulos = [chr(ord("A") + i) for i in range(len(blocos))]
-    respostas_cegas = []
-    for rotulo, bloco in zip(rotulos, blocos):
-        respostas_cegas.append({
-            "rotulo": rotulo,
-            "resposta_id": bloco["resposta_id"],
-            "texto": bloco["texto"],
-            # modelo_llm é devolvido só para conferência/debug;
-            # o frontend NÃO o exibe ao avaliador.
-            "modelo_llm": bloco["modelo_llm"],
-        })
-
-    logger.info(f"Comparação gerada às cegas (consulta_id={consulta.id}).")
-    return {
-        "consulta_id": consulta.id,
-        "pergunta": pergunta,
-        "fontes": fontes,
-        "respostas": respostas_cegas,
-    }
-
-
-# ─────────────────────────────────────────────
-# Avaliação (nota 1 a 5)
-# ─────────────────────────────────────────────
-def salvar_avaliacao(
-    db: Session,
-    id_resposta: int,
-    nota: int,
-    comentario: str | None = None,
-    avaliador: str | None = None,
-) -> Dict[str, Any]:
-    if nota < 1 or nota > 5:
-        raise ValueError("A nota deve estar entre 1 e 5.")
-    resposta = db.query(Resposta).filter(Resposta.id == id_resposta).first()
-    if not resposta:
-        raise ValueError(f"Resposta {id_resposta} não encontrada.")
-
-    avaliacao = Avaliacao(
-        id_resposta=id_resposta,
-        nota=nota,
-        comentario=comentario,
-        avaliador=avaliador,
-    )
-    db.add(avaliacao)
-    db.commit()
-    db.refresh(avaliacao)
-    logger.info(f"Avaliação salva (resposta_id={id_resposta}, nota={nota}).")
-    return {"avaliacao_id": avaliacao.id, "id_resposta": id_resposta, "nota": nota}
-
-# ─────────────────────────────────────────────
-# Resultados consolidados (para a apresentação)
-# ─────────────────────────────────────────────
-def listar_resultados(db: Session) -> Dict[str, Any]:
-    """
-    Devolve:
-      - linhas: cada avaliação com pergunta, documento, dificuldade, LLM, nota
-      - resumo: nota média por LLM x dificuldade e por LLM
-    """
-    avaliacoes = db.query(Avaliacao).all()
-    linhas = []
-    for a in avaliacoes:
-        resposta = a.resposta
-        if not resposta:
-            continue
-        consulta = (
-            db.query(Consulta).filter(Consulta.id == resposta.id_consulta).first()
-        )
-        doc = consulta.documento if consulta else None
-        linhas.append({
-            "avaliacao_id": a.id,
-            "consulta_id": consulta.id if consulta else None,
-            "pergunta": consulta.pergunta if consulta else None,
-            "documento": doc.titulo if doc else None,
-            "nivel_dificuldade": doc.nivel_dificuldade if doc else None,
-            "modelo_llm": resposta.modelo_llm,
-            "nota": a.nota,
-            "comentario": a.comentario,
-            "avaliador": a.avaliador,
-            "data_hora": a.data_hora.isoformat() if a.data_hora else None,
-        })
-
-    # agregações
-    def _media(valores):
-        return round(sum(valores) / len(valores), 2) if valores else None
-
-    por_llm: Dict[str, List[int]] = {}
-    por_llm_dif: Dict[str, List[int]] = {}
-    for l in linhas:
-        llm = l["modelo_llm"] or "desconhecido"
-        dif = l["nivel_dificuldade"] or "sem_rotulo"
-        por_llm.setdefault(llm, []).append(l["nota"])
-        por_llm_dif.setdefault(f"{llm}|{dif}", []).append(l["nota"])
-
-    resumo_llm = [
-        {"modelo_llm": llm, "nota_media": _media(notas), "n": len(notas)}
-        for llm, notas in sorted(por_llm.items())
-    ]
-    resumo_llm_dif = []
-    for chave, notas in sorted(por_llm_dif.items()):
-        llm, dif = chave.split("|", 1)
-        resumo_llm_dif.append({
-            "modelo_llm": llm,
-            "nivel_dificuldade": dif,
-            "nota_media": _media(notas),
-            "n": len(notas),
-        })
-
-    return {
-        "linhas": linhas,
-        "resumo_por_llm": resumo_llm,
-        "resumo_por_llm_dificuldade": resumo_llm_dif,
     }
 
 

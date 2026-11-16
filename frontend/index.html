@@ -13,8 +13,7 @@
       --texto:   #1e293b;
       --verde:   #16a34a;
       --laranja: #ea580c;
-      --amarelo: #f59e0b;
-    }
+      }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -32,19 +31,8 @@
     header h1 { font-size: 1.3rem; font-weight: 700; }
     header span { font-size: .85rem; opacity: .75; }
 
-    .tabs {
-      display: flex; gap: .5rem;
-      max-width: 1100px; margin: 1.2rem auto 0; padding: 0 1rem;
-    }
-    .tab {
-      padding: .6rem 1.2rem; border-radius: 8px 8px 0 0;
-      background: #e2e8f0; cursor: pointer; font-weight: 600;
-      font-size: .9rem; color: #475569; border: none;
-    }
-    .tab.active { background: white; color: var(--azul); }
-
     .container {
-      max-width: 1100px; margin: 0 auto; padding: 1rem;
+      max-width: 1100px; margin: 1.2rem auto 0; padding: 1rem;
       display: grid; grid-template-columns: 1fr 300px; gap: 1.5rem;
     }
     @media (max-width: 760px) { .container { grid-template-columns: 1fr; } }
@@ -72,7 +60,6 @@
     button:disabled { opacity: .5; cursor: not-allowed; }
     .btn-primary { background: var(--azul2); color: white; }
     .btn-outline { background: white; color: var(--azul); border: 1.5px solid var(--azul); }
-    .btn-green   { background: var(--verde); color: white; }
 
     .resposta-texto {
       background: #f8fafc; border: 1px solid var(--borda); border-radius: 8px;
@@ -85,25 +72,6 @@
     .fonte-item strong { display: block; color: var(--azul); }
     .score { color: var(--verde); font-weight: 600; font-size: .78rem; }
 
-    /* Estrelas de avaliação */
-    .stars { font-size: 1.7rem; cursor: pointer; user-select: none; letter-spacing: .15rem; }
-    .stars .star { color: #cbd5e1; transition: color .1s; }
-    .stars .star.on { color: var(--amarelo); }
-
-    .resultado-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:1rem; }
-    @media (max-width: 700px){ .resultado-grid{ grid-template-columns:1fr; } }
-    .badge { display:inline-block; padding:.15rem .5rem; border-radius:6px; font-size:.72rem; font-weight:700; color:white; }
-
-    table { width:100%; border-collapse: collapse; font-size:.85rem; }
-    th, td { padding:.5rem .6rem; border-bottom:1px solid var(--cinza); text-align:left; }
-    th { color: var(--azul); }
-
-    .bar-wrap { margin:.4rem 0; }
-    .bar-label { font-size:.78rem; color:#475569; margin-bottom:.15rem; }
-    .bar-track { background:#e2e8f0; border-radius:6px; overflow:hidden; height:22px; }
-    .bar-fill { height:100%; background:var(--azul2); color:white; font-size:.72rem;
-                display:flex; align-items:center; padding-left:.5rem; }
-
     .ok  { color: var(--verde); }
     .err { color: var(--laranja); }
     .upload-area {
@@ -112,7 +80,7 @@
       flex-direction: column; align-items: center; gap: .4rem;
     }
     .upload-area input { display: none; }
-    #upload-status, #aval-status { font-size:.85rem; min-height:1.2em; margin-top:.5rem; }
+    #upload-status { font-size:.85rem; min-height:1.2em; margin-top:.5rem; }
     .hist-item { padding:.55rem 0; border-bottom:1px solid var(--cinza); font-size:.83rem; cursor:pointer; }
     .hist-item:hover { color: var(--azul2); }
     .hist-data { font-size:.75rem; color:#94a3b8; }
@@ -135,98 +103,39 @@
   </div>
 </header>
 
-<div class="tabs">
-  <button class="tab active" data-tab="consulta" onclick="trocarAba('consulta')">Consulta</button>
-  <button class="tab" data-tab="avaliacao" onclick="trocarAba('avaliacao')">Avaliação (Comparar LLMs)</button>
-  <button class="tab" data-tab="resultados" onclick="trocarAba('resultados')">Resultados</button>
-</div>
-
 <div class="container">
+  <!-- ───────── CONSULTA ───────── -->
   <div>
-    <!-- ───────── ABA CONSULTA ───────── -->
-    <div id="aba-consulta">
-      <div class="card">
-        <h2>Consulta Jurídica</h2>
-        <label class="lbl">Pergunta</label>
-        <textarea id="pergunta" placeholder="Digite sua pergunta jurídica..."></textarea>
+    <div class="card">
+      <h2>Consulta Jurídica</h2>
+      <label class="lbl">Pergunta</label>
+      <textarea id="pergunta" placeholder="Digite sua pergunta jurídica..."></textarea>
 
-        <label class="lbl">Modelo de linguagem (LLM)</label>
-        <select id="provedor">
-          <option value="maritaca">Maritaca — Sabiá</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="openai">ChatGPT (OpenAI)</option>
-        </select>
+      <label class="lbl">Modelo de linguagem (LLM)</label>
+      <select id="provedor">
+        <option value="maritaca">Maritaca — Sabiá</option>
+        <option value="openai">ChatGPT (OpenAI)</option>
+      </select>
 
-        <label class="lbl">Documento (opcional — deixe "Todos" para busca ampla)</label>
-        <select id="doc-consulta"><option value="">Todos os documentos</option></select>
+      <label class="lbl">Documento (opcional — deixe "Todos" para busca ampla)</label>
+      <select id="doc-consulta"><option value="">Todos os documentos</option></select>
 
-        <div class="btn-row">
-          <button class="btn-primary" id="btn-consultar" onclick="consultar()">Consultar</button>
-          <button class="btn-outline" onclick="limpar()">Limpar</button>
-        </div>
-
-        <div id="resposta-box" class="hidden">
-          <h2 style="margin-top:1.25rem">Resposta</h2>
-          <div id="resposta-texto" class="resposta-texto"></div>
-          <h2 style="margin-top:1rem">Fontes Utilizadas</h2>
-          <div id="fontes-conteudo"></div>
-        </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-consultar" onclick="consultar()">Consultar</button>
+        <button class="btn-outline" onclick="limpar()">Limpar</button>
       </div>
 
-      <div class="card">
-        <h2>Histórico de Consultas</h2>
-        <div id="historico-lista"><p class="hint">Carregando histórico...</p></div>
+      <div id="resposta-box" class="hidden">
+        <h2 style="margin-top:1.25rem">Resposta</h2>
+        <div id="resposta-texto" class="resposta-texto"></div>
+        <h2 style="margin-top:1rem">Fontes Utilizadas</h2>
+        <div id="fontes-conteudo"></div>
       </div>
     </div>
 
-    <!-- ───────── ABA AVALIAÇÃO ───────── -->
-    <div id="aba-avaliacao" class="hidden">
-      <div class="card">
-        <h2>Avaliação às cegas — Comparação de LLMs</h2>
-        <p class="hint" style="margin-bottom:.8rem">
-          O sistema gera duas respostas (Resposta A e Resposta B) a partir do mesmo
-          contexto, sem revelar qual LLM gerou cada uma. Dê uma nota de 1 a 5 para cada.
-        </p>
-
-        <label class="lbl">Avaliador (nome — opcional)</label>
-        <input type="text" id="avaliador" placeholder="Ex.: Dra. Fulana (advogada)" />
-
-        <label class="lbl">Documento do teste</label>
-        <select id="doc-aval"><option value="">Selecione um documento...</option></select>
-
-        <label class="lbl">Pergunta</label>
-        <textarea id="pergunta-aval" placeholder="Digite a pergunta a ser avaliada..."></textarea>
-
-        <div class="btn-row">
-          <button class="btn-primary" id="btn-comparar" onclick="comparar()">Gerar comparação</button>
-        </div>
-        <div id="aval-status"></div>
-      </div>
-
-      <div id="comparacao-box" class="hidden">
-        <div id="respostas-container" class="resultado-grid"></div>
-        <div class="card">
-          <div class="btn-row">
-            <button class="btn-green" id="btn-salvar-aval" onclick="salvarAvaliacoes()">Salvar avaliações</button>
-          </div>
-          <div id="save-status" style="margin-top:.6rem;font-size:.88rem"></div>
-          <div id="revelacao" class="hidden" style="margin-top:.6rem;font-size:.85rem"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ───────── ABA RESULTADOS ───────── -->
-    <div id="aba-resultados" class="hidden">
-      <div class="card">
-        <h2>Resultados das Avaliações</h2>
-        <div class="btn-row">
-          <button class="btn-primary" onclick="carregarResultados()">Atualizar</button>
-          <button class="btn-outline" onclick="baixarCSV()">Baixar CSV</button>
-        </div>
-        <div id="resultados-conteudo" style="margin-top:1rem">
-          <p class="hint">Clique em "Atualizar" para carregar.</p>
-        </div>
-      </div>
+    <div class="card">
+      <h2>Histórico de Consultas</h2>
+      <div id="historico-lista"><p class="hint">Carregando histórico...</p></div>
     </div>
   </div>
 
@@ -240,13 +149,6 @@
         <p class="hint" id="upload-label">Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em></p>
       </label>
       <input type="text" id="titulo-doc" placeholder="Título do documento" style="margin-top:.6rem" />
-      <label class="lbl">Nível de dificuldade (para o experimento)</label>
-      <select id="dificuldade-doc">
-        <option value="">Não definir</option>
-        <option value="facil">Fácil</option>
-        <option value="medio">Médio</option>
-        <option value="dificil">Difícil</option>
-      </select>
       <button class="btn-primary" style="width:100%;margin-top:.6rem" onclick="fazerUpload()">Indexar</button>
       <div id="upload-status"></div>
     </div>
@@ -262,7 +164,6 @@
   // a página é servida pela própria API: caminhos relativos funcionam
   // tanto em localhost quanto no domínio hospedado
   const API_BASE = "/api/v1";
-  let respostasAtuais = [];   // [{resposta_id, modelo_llm, rotulo, nota}]
 
   // escapa texto vindo do servidor antes de inserir em innerHTML
   function esc(v){
@@ -290,14 +191,6 @@
     verificarAPI(); carregarHistorico(); carregarDocumentos();
   });
 
-  function trocarAba(nome){
-    document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active", t.dataset.tab===nome));
-    ["consulta","avaliacao","resultados"].forEach(a=>{
-      document.getElementById("aba-"+a).classList.toggle("hidden", a!==nome);
-    });
-    if(nome==="resultados") carregarResultados();
-  }
-
   async function verificarAPI(){
     const el = document.getElementById("api-status");
     try{
@@ -315,22 +208,17 @@
       if(!r.ok) return [];
       const docs = await r.json();
       const selConsulta = document.getElementById("doc-consulta");
-      const selAval = document.getElementById("doc-aval");
       selConsulta.innerHTML = '<option value="">Todos os documentos</option>';
-      selAval.innerHTML = '<option value="">Selecione um documento...</option>';
       const rotuloStatus = { processando:" (indexando…)", erro:" (falhou)" };
       docs.forEach(d=>{
-        const dif = d.nivel_dificuldade ? ` [${d.nivel_dificuldade}]` : "";
         const pronto = d.status === "concluido";
-        const opt = `<option value="${d.id}"${pronto ? "" : " disabled"}>${esc(d.titulo)}${esc(dif)}${rotuloStatus[d.status] || ""}</option>`;
-        selConsulta.innerHTML += opt;
-        selAval.innerHTML += opt;
+        selConsulta.innerHTML += `<option value="${d.id}"${pronto ? "" : " disabled"}>${esc(d.titulo)}${rotuloStatus[d.status] || ""}</option>`;
       });
       return docs;
     }catch(e){ console.error("Erro ao carregar documentos", e); return []; }
   }
 
-  /* ───── Consulta com 1 LLM ───── */
+  /* ───── Consulta ───── */
   async function consultar(){
     const pergunta = document.getElementById("pergunta").value.trim();
     if(!pergunta){ alert("Digite uma pergunta."); return; }
@@ -371,153 +259,6 @@
     document.getElementById("resposta-box").classList.add("hidden");
   }
 
-  /* ───── Comparação às cegas (dinâmica: 2 ou mais LLMs) ───── */
-  function setNota(idx, v){
-    respostasAtuais[idx].nota = v;
-    const el = document.getElementById("stars-" + idx);
-    [...el.children].forEach(s => s.classList.toggle("on", Number(s.dataset.v) <= v));
-  }
-
-  function montarCartoes(){
-    const cont = document.getElementById("respostas-container");
-    cont.innerHTML = "";
-    respostasAtuais.forEach((resp, idx) => {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <h2>Resposta ${esc(resp.rotulo)}</h2>
-        <div class="resposta-texto">${esc(resp.texto)}</div>
-        <label class="lbl">Nota (1 a 5)</label>
-        <div class="stars" id="stars-${idx}"></div>
-        <label class="lbl">Comentário (opcional)</label>
-        <textarea id="coment-${idx}" style="height:60px"></textarea>`;
-      cont.appendChild(card);
-      const starsEl = document.getElementById("stars-" + idx);
-      for(let i=1;i<=5;i++){
-        const s = document.createElement("span");
-        s.className="star"; s.textContent="★"; s.dataset.v=i;
-        s.onclick=()=>setNota(idx, i);
-        starsEl.appendChild(s);
-      }
-    });
-  }
-
-  async function comparar(){
-    const pergunta = document.getElementById("pergunta-aval").value.trim();
-    const idDoc = document.getElementById("doc-aval").value;
-    const status = document.getElementById("aval-status");
-    if(!idDoc){ status.innerHTML='<span class="err">Selecione um documento.</span>'; return; }
-    if(!pergunta){ status.innerHTML='<span class="err">Digite a pergunta.</span>'; return; }
-
-    const btn = document.getElementById("btn-comparar");
-    btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Gerando respostas...';
-    status.textContent="";
-    document.getElementById("comparacao-box").classList.add("hidden");
-    document.getElementById("revelacao").classList.add("hidden");
-    try{
-      const r = await api("/comparar",{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ pergunta, id_documento: Number(idDoc) })
-      });
-      const d = await r.json();
-      if(!r.ok) throw new Error(d.detail || r.status);
-      respostasAtuais = d.respostas.map(x => ({
-        resposta_id: x.resposta_id,
-        modelo_llm: x.modelo_llm,
-        rotulo: x.rotulo,
-        texto: x.texto,
-        nota: 0,
-      }));
-      montarCartoes();
-      document.getElementById("save-status").textContent="";
-      document.getElementById("comparacao-box").classList.remove("hidden");
-    }catch(e){ status.innerHTML='<span class="err">Erro ao gerar comparação.</span>'; console.error(e); }
-    finally{ btn.disabled=false; btn.textContent="Gerar comparação"; }
-  }
-
-  async function salvarAvaliacoes(){
-    if(respostasAtuais.some(r => r.nota < 1)){
-      document.getElementById("save-status").innerHTML='<span class="err">Dê uma nota (1-5) para todas as respostas.</span>';
-      return;
-    }
-    const avaliador = document.getElementById("avaliador").value.trim() || null;
-    const btn = document.getElementById("btn-salvar-aval");
-    btn.disabled=true;
-    try{
-      for(let idx=0; idx<respostasAtuais.length; idx++){
-        const r = respostasAtuais[idx];
-        const coment = document.getElementById("coment-"+idx).value.trim();
-        await enviarAvaliacao(r.resposta_id, r.nota, coment, avaliador);
-      }
-      document.getElementById("save-status").innerHTML='<span class="ok">✅ Avaliações salvas!</span>';
-      // Revela qual LLM era cada uma (só após salvar, para não enviesar)
-      const rev = document.getElementById("revelacao");
-      rev.innerHTML = "Identificação (revelada após salvar): " +
-        respostasAtuais.map(r => `<b>Resposta ${esc(r.rotulo)} = ${esc(r.modelo_llm)}</b>`).join(" · ");
-      rev.classList.remove("hidden");
-    }catch(e){ document.getElementById("save-status").innerHTML='<span class="err">Erro ao salvar.</span>'; console.error(e); }
-    finally{ btn.disabled=false; }
-  }
-
-  async function enviarAvaliacao(id_resposta, nota, comentario, avaliador){
-    const r = await api("/avaliar",{
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ id_resposta, nota, comentario: comentario||null, avaliador })
-    });
-    if(!r.ok) throw new Error("falha ao avaliar");
-  }
-
-  /* ───── Resultados ───── */
-  async function carregarResultados(){
-    const el = document.getElementById("resultados-conteudo");
-    el.innerHTML = '<p class="hint">Carregando...</p>';
-    try{
-      const r = await api("/resultados");
-      const d = await r.json();
-      if(!r.ok) throw new Error(d.detail || r.status);
-      if(!d.linhas.length){ el.innerHTML='<p class="hint">Ainda não há avaliações salvas.</p>'; return; }
-
-      // Gráfico: nota média por LLM x dificuldade
-      let chart = '<h2 style="margin-bottom:.6rem">Nota média por LLM e dificuldade</h2>';
-      const cores = { maritaca:"#2563eb", deepseek:"#16a34a", openai:"#ea580c" };
-      d.resumo_por_llm_dificuldade.forEach(row=>{
-        const pct = (row.nota_media/5*100).toFixed(0);
-        const cor = cores[row.modelo_llm] || "#64748b";
-        chart += `<div class="bar-wrap"><div class="bar-label">${esc(row.modelo_llm)} · ${esc(row.nivel_dificuldade)} (n=${row.n})</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${cor}">${row.nota_media}</div></div></div>`;
-      });
-
-      // Resumo geral por LLM
-      let resumo = '<h2 style="margin:1rem 0 .6rem">Média geral por LLM</h2><table><tr><th>LLM</th><th>Nota média</th><th>Avaliações</th></tr>';
-      d.resumo_por_llm.forEach(row=>{
-        resumo += `<tr><td>${esc(row.modelo_llm)}</td><td><b>${row.nota_media}</b></td><td>${row.n}</td></tr>`;
-      });
-      resumo += '</table>';
-
-      // Tabela detalhada
-      let tabela = '<h2 style="margin:1rem 0 .6rem">Detalhe</h2><table><tr><th>Doc</th><th>Dif.</th><th>LLM</th><th>Nota</th><th>Avaliador</th></tr>';
-      d.linhas.forEach(l=>{
-        tabela += `<tr><td>${esc(l.documento||"-")}</td><td>${esc(l.nivel_dificuldade||"-")}</td>
-          <td>${esc(l.modelo_llm)}</td><td><b>${l.nota}</b></td><td>${esc(l.avaliador||"-")}</td></tr>`;
-      });
-      tabela += '</table>';
-
-      el.innerHTML = chart + resumo + tabela;
-    }catch(e){ el.innerHTML='<p class="err">Erro ao carregar resultados.</p>'; console.error(e); }
-  }
-
-  // o download passa pelo api() para levar o token (um link simples não leva)
-  async function baixarCSV(){
-    try{
-      const r = await api("/resultados/csv");
-      if(!r.ok) throw new Error(r.status);
-      const url = URL.createObjectURL(await r.blob());
-      const a = document.createElement("a");
-      a.href = url; a.download = "avaliacoes.csv"; a.click();
-      URL.revokeObjectURL(url);
-    }catch(e){ alert("Erro ao baixar o CSV."); console.error(e); }
-  }
-
   /* ───── Upload ───── */
   function atualizarNomeArquivo(){
     const input = document.getElementById("arquivo-input");
@@ -530,7 +271,6 @@
   async function fazerUpload(){
     const input = document.getElementById("arquivo-input");
     const titulo = document.getElementById("titulo-doc").value.trim();
-    const dif = document.getElementById("dificuldade-doc").value;
     const status = document.getElementById("upload-status");
     if(!input.files.length){ status.innerHTML='<span class="err">Selecione um arquivo.</span>'; return; }
     if(!titulo){ status.innerHTML='<span class="err">Informe o título.</span>'; return; }
@@ -538,14 +278,12 @@
     const fd = new FormData();
     fd.append("arquivo", input.files[0]);
     fd.append("titulo", titulo);
-    if(dif) fd.append("nivel_dificuldade", dif);
     try{
       const r = await api("/ingerir",{ method:"POST", body: fd });
       const d = await r.json();
       if(r.ok){
         input.value=""; document.getElementById("titulo-doc").value="";
         document.getElementById("upload-label").innerHTML="Clique ou arraste um arquivo<br><em>PDF, TXT ou HTML</em>";
-        document.getElementById("dificuldade-doc").value="";
         acompanharIndexacao(d.documento_id, d.mensagem);
       } else { status.innerHTML = `<span class="err">❌ ${esc(d.detail)}</span>`; }
     }catch(e){ status.innerHTML='<span class="err">❌ Erro de conexão com a API.</span>'; }
@@ -588,7 +326,6 @@
   }
   function preencherPergunta(texto){
     document.getElementById("pergunta").value = texto;
-    trocarAba("consulta");
     window.scrollTo({ top:0, behavior:"smooth" });
   }
 </script>

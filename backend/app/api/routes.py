@@ -1,9 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
-import shutil, os, tempfile, io, csv
+import shutil, os, tempfile
 
 from app.core.database import get_db
 from app.models.models import Fonte, Documento
@@ -17,22 +16,9 @@ router = APIRouter()
 # ─────────────────────────────────────────────
 class PerguntaRequest(BaseModel):
     pergunta: str
-    provedor: Optional[str] = "maritaca"      # 'maritaca' ou 'deepseek'
+    provedor: Optional[str] = "maritaca"      # 'maritaca' ou 'openai'
     id_documento: Optional[int] = None
     top_k: Optional[int] = None
-
-
-class CompararRequest(BaseModel):
-    pergunta: str
-    id_documento: Optional[int] = None
-    top_k: Optional[int] = None
-
-
-class AvaliacaoRequest(BaseModel):
-    id_resposta: int
-    nota: int                                  # 1 a 5
-    comentario: Optional[str] = None
-    avaliador: Optional[str] = None
 
 
 class FonteSchema(BaseModel):
@@ -48,7 +34,6 @@ class FonteSchema(BaseModel):
 class DocumentoSchema(BaseModel):
     id: int
     titulo: str
-    nivel_dificuldade: Optional[str] = None
     status: str                                # 'processando', 'concluido' ou 'erro'
     erro: Optional[str] = None
 
@@ -73,67 +58,6 @@ def consultar(req: PerguntaRequest, db: Session = Depends(get_db)):
 
 
 # ─────────────────────────────────────────────
-# Comparação às cegas entre as duas LLMs
-# ─────────────────────────────────────────────
-@router.post("/comparar", tags=["Avaliação"])
-def comparar(req: CompararRequest, db: Session = Depends(get_db)):
-    if not req.pergunta.strip():
-        raise HTTPException(status_code=400, detail="Pergunta não pode estar vazia.")
-    return rag_service.comparar_llms(
-        db=db,
-        pergunta=req.pergunta,
-        id_documento=req.id_documento,
-        top_k=req.top_k,
-    )
-
-
-# ─────────────────────────────────────────────
-# Salvar avaliação (nota 1 a 5)
-# ─────────────────────────────────────────────
-@router.post("/avaliar", tags=["Avaliação"])
-def avaliar(req: AvaliacaoRequest, db: Session = Depends(get_db)):
-    try:
-        return rag_service.salvar_avaliacao(
-            db=db,
-            id_resposta=req.id_resposta,
-            nota=req.nota,
-            comentario=req.comentario,
-            avaliador=req.avaliador,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-# ─────────────────────────────────────────────
-# Resultados consolidados (para a apresentação)
-# ─────────────────────────────────────────────
-@router.get("/resultados", tags=["Avaliação"])
-def resultados(db: Session = Depends(get_db)):
-    return rag_service.listar_resultados(db=db)
-
-
-@router.get("/resultados/csv", tags=["Avaliação"])
-def resultados_csv(db: Session = Depends(get_db)):
-    dados = rag_service.listar_resultados(db=db)
-    buffer = io.StringIO()
-    campos = [
-        "avaliacao_id", "consulta_id", "pergunta", "documento",
-        "nivel_dificuldade", "modelo_llm", "nota", "comentario",
-        "avaliador", "data_hora",
-    ]
-    writer = csv.DictWriter(buffer, fieldnames=campos)
-    writer.writeheader()
-    for linha in dados["linhas"]:
-        writer.writerow(linha)
-    buffer.seek(0)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=avaliacoes.csv"},
-    )
-
-
-# ─────────────────────────────────────────────
 # Histórico / Ingestão / Listagens
 # ─────────────────────────────────────────────
 @router.get("/historico", tags=["RAG"])
@@ -147,7 +71,6 @@ def ingerir_documento(
     arquivo: UploadFile = File(...),
     titulo: str = Form(...),
     id_fonte: Optional[int] = Form(None),
-    nivel_dificuldade: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -166,7 +89,7 @@ def ingerir_documento(
     try:
         doc, precisa_processar = ingestao_service.registrar_documento(
             db=db, caminho=tmp_path, titulo=titulo,
-            id_fonte=id_fonte, nivel_dificuldade=nivel_dificuldade,
+            id_fonte=id_fonte,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -182,7 +105,6 @@ def ingerir_documento(
         "mensagem": mensagem,
         "documento_id": doc.id,
         "titulo": doc.titulo,
-        "nivel_dificuldade": doc.nivel_dificuldade,
         "status": doc.status,
     }
 
