@@ -33,7 +33,7 @@ Cada chunk guarda o texto e o seu vetor na mesma linha da tabela `chunks` (ver "
 ## Pré-requisitos
 
 - Python 3.13
-- Docker Desktop (só para o banco local; ou use um banco gerenciado também no desenvolvimento)
+- Um Postgres com pgvector — em geral o Neon (ver "Hospedagem")
 - Chave da OpenAI (embeddings) e da Maritaca (respostas)
 
 ---
@@ -55,10 +55,7 @@ Crie um arquivo `.env` na raiz do projeto com o seguinte conteúdo (substitua as
 
 ```env
 # ── Banco de dados ───────────────────────────────────────
-DATABASE_URL=postgresql+psycopg://postgres:senha@127.0.0.1:5433/agente_juridico
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=senha
-POSTGRES_DB=agente_juridico
+DATABASE_URL=postgresql://usuario:senha@host.neon.tech/neondb?sslmode=require
 
 # ── Modelos de linguagem ─────────────────────────────────
 MARITACA_API_KEY=sua_chave_maritaca
@@ -97,32 +94,26 @@ LOG_FILE=                   # vazio: só stdout
 
 ## Execução
 
-1. Subir o banco de dados (porta 5433):
-
-```bash
-docker compose up -d postgres
-```
-
-2. Iniciar a API (dentro da pasta `backend/`). Ao iniciar, ela habilita o pgvector e cria as tabelas que faltarem:
+1. Iniciar a API (dentro da pasta `backend/`), com o `DATABASE_URL` do `.env` apontando para o banco. Ao iniciar, ela habilita o pgvector e cria as tabelas que faltarem:
 
 ```bash
 cd backend
 python -m uvicorn app.main:app --reload --port 8001
 ```
 
-3. Abrir a interface em `http://localhost:8001/` (a API serve o `index.html` na raiz).
+2. Abrir a interface em `http://localhost:8001/` (a API serve o `index.html` na raiz).
 
 Documentação interativa da API (Swagger): `http://localhost:8001/docs`.
 
-> As portas 5433 e 8001 (e não as padrão 5432 e 8000) deixam o produto rodar ao mesmo tempo que o TCC.
-
-> Alternativa: `docker compose up --build` sobe banco e backend juntos, sem precisar de Python local. O `docker-compose.yml` é só para desenvolvimento (reload, código montado, senha padrão).
+> A porta 8001 (e não a padrão 8000) deixa o produto rodar ao mesmo tempo que o TCC.
+>
+> Apontar o `.env` local para o banco de produção mistura testes com dados reais. Enquanto o site não tiver usuários isso é aceitável; depois, use uma branch de desenvolvimento do Neon.
 
 ---
 
 ## Hospedagem
 
-Em produção são duas peças, sem Docker:
+Em produção são duas peças:
 
 1. **Banco:** um Postgres gerenciado com pgvector, como [Neon](https://neon.tech) ou [Supabase](https://supabase.com). Copie a URL de conexão (`postgresql://...`); a API acrescenta o driver sozinha. As tabelas são criadas na primeira inicialização.
 2. **API:** uma plataforma que rode Python a partir do repositório, como [Render](https://render.com) ou [Railway](https://railway.app).
@@ -146,8 +137,6 @@ Em outra plataforma, a configuração é esta:
 Com `API_TOKEN` definido, as rotas `/api/v1` exigem o cabeçalho `X-API-Key`. A página pede o token na primeira chamada recusada e o guarda no navegador. A página e o `/health` continuam públicos.
 
 **Uma instância só.** A indexação roda em segundo plano no próprio processo da API: o upload responde na hora, e o status do documento (`processando`, `concluido` ou `erro`) aparece em `GET /documentos`. Se o servidor reiniciar no meio, o documento fica com erro e basta enviar o arquivo de novo. Com mais de uma instância, isso precisaria de uma fila.
-
-O `backend/Dockerfile` continua disponível para plataformas que preferem imagem (build a partir da raiz: `docker build -f backend/Dockerfile .`).
 
 ---
 

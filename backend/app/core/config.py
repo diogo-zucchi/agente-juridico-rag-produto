@@ -4,8 +4,8 @@ from pathlib import Path
 ENV_FILE = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 class Settings(BaseSettings):
-    # 127.0.0.1 e não localhost: o compose só publica o banco em IPv4.
-    # Porta 5433: a 5432 fica com o banco do TCC.
+    # defina no .env (ex.: a URL do Neon). O padrão só serve para um Postgres
+    # local na 5433 — a 5432 fica com o banco do TCC.
     database_url: str = "postgresql+psycopg://postgres:senha@127.0.0.1:5433/agente_juridico"
 
     # ── LLMs ──────────────────────────────────────────────

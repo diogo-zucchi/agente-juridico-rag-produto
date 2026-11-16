@@ -1,6 +1,6 @@
 """
 Modelos ORM — são a definição do esquema: criar_tabelas() cria as
-tabelas a partir deles, tanto no Docker local quanto num banco hospedado.
+tabelas a partir deles ao iniciar a API.
 """
 from sqlalchemy import (
     Column, Integer, String, Text, Date, Float,

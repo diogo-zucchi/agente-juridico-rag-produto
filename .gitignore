@@ -30,5 +30,4 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Docker
 *.log
